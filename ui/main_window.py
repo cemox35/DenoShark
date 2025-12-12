@@ -15,7 +15,7 @@ from PyQt6.QtGui import QPixmap
 
 from utils.logger import setup_logger
 from utils.config import (
-    WINDOW_WIDTH, WINDOW_HEIGHT, APP_NAME, APP_VERSION
+    WINDOW_WIDTH, WINDOW_HEIGHT, APP_NAME, APP_VERSION, TEMP_DIR
 )
 from video_processor import (
     VideoHandler, VideoTrimmer, AudioExtractor,
@@ -214,6 +214,13 @@ class MainWindow(QMainWindow):
         self.denoise_strength.setSingleStep(0.1)
         strength_layout.addWidget(self.denoise_strength)
         denoise_layout.addLayout(strength_layout)
+
+        auto_strength_btn = QPushButton("🤖 Otomatik Güç")
+        auto_strength_btn.clicked.connect(self.auto_set_denoise_strength)
+        denoise_layout.addWidget(auto_strength_btn)
+
+        self.denoise_metrics_label = QLabel("SNR: - dB | Kalite: -/5")
+        denoise_layout.addWidget(self.denoise_metrics_label)
         
         denoise_btn = QPushButton("🔇 Gürültüyü Azalt")
         denoise_btn.clicked.connect(self.reduce_noise)
@@ -541,11 +548,47 @@ class MainWindow(QMainWindow):
                     self.statusBar().showMessage(f"✅ Sessiz video başarıyla kırpıldı: {Path(output_video_path).name}")
                 else:
                     self.statusBar().showMessage("❌ Video kırpılamadı")
+
+    def _ensure_current_audio_path(self) -> bool:
+        """Gerekirse seçili videodan geçici ses çıkarıp current_audio_path set eder."""
+        if self.current_audio_path:
+            return True
+
+        video_path = None
+        start_time = 0.0
+        end_time = None
+
+        # Öncelik: Ses sekmesinde yüklü video
+        if hasattr(self, 'audio_video_path') and self.audio_video_path:
+            video_path = self.audio_video_path
+            if self.audio_timeline_widget:
+                start_time, end_time = self.audio_timeline_widget.get_start_end_seconds()
+        elif self.current_video_path:
+            video_path = self.current_video_path
+            if self.timeline_widget:
+                start_time, end_time = self.timeline_widget.get_start_end_seconds()
+
+        if not video_path:
+            return False
+
+        try:
+            TEMP_DIR.mkdir(exist_ok=True)
+            tmp_audio_path = str(TEMP_DIR / f"{Path(video_path).stem}_auto_audio.wav")
+            self.statusBar().showMessage("Ses çıkarılıyor... (gürültü azaltma için)")
+            extractor = AudioExtractor()
+            success = extractor.extract(video_path, tmp_audio_path, float(start_time), end_time)
+            if success:
+                self.current_audio_path = tmp_audio_path
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Otomatik ses çıkarma hatası: {e}")
+            return False
     
     def reduce_noise(self):
         """Gürültü azalt"""
-        if not self.current_audio_path:
-            self.statusBar().showMessage("Lütfen önce bir video seçip ses çıkarın")
+        if not self._ensure_current_audio_path():
+            self.statusBar().showMessage("Lütfen önce bir video seçin")
             return
         
         audio_name = Path(self.current_audio_path).stem
@@ -563,17 +606,38 @@ class MainWindow(QMainWindow):
             logger.info(f"Gürültü azaltma başlatılıyor...")
             
             reducer = NoiseReducer()
-            success = reducer.reduce_noise(
+            result = reducer.reduce_noise(
                 self.current_audio_path,
                 output_path,
-                reduction_strength=self.denoise_strength.value()
+                reduction_strength=self.denoise_strength.value(),
+                get_metrics=True
             )
             
-            if success:
+            if isinstance(result, dict) and result.get("success"):
                 self.current_audio_path = output_path
+                metrics = result.get("metrics") or {}
+                if metrics:
+                    snr_db = metrics.get("snr_db")
+                    quality = metrics.get("quality_score")
+                    self.denoise_metrics_label.setText(f"SNR: {snr_db:.1f} dB | Kalite: {quality:.2f}/5")
                 self.statusBar().showMessage(f"✅ Gürültü azaltıldı: {Path(output_path).name}")
             else:
-                self.statusBar().showMessage("❌ Gürültü azaltılamadı")
+                error_msg = result.get("error") if isinstance(result, dict) else None
+                self.statusBar().showMessage("❌ Gürültü azaltılamadı" + (f": {error_msg}" if error_msg else ""))
+
+    def auto_set_denoise_strength(self):
+        """Gürültü azaltma gücünü otomatik ayarla"""
+        if not self._ensure_current_audio_path():
+            self.statusBar().showMessage("Lütfen önce bir video seçin")
+            return
+
+        try:
+            strength = NoiseReducer.auto_detect_strength(self.current_audio_path)
+            self.denoise_strength.setValue(float(strength))
+            self.statusBar().showMessage(f"🤖 Otomatik güç ayarlandı: {strength:.2f}")
+        except Exception as e:
+            logger.error(f"Otomatik güç ayarı UI hata: {e}")
+            self.statusBar().showMessage("❌ Otomatik güç ayarlanamadı")
     
     def mix_audio(self):
         """Ses karıştır"""
