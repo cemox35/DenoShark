@@ -1,6 +1,6 @@
 # 🎬 DenoShark - Professional Video Editor
 
-Nişanlı için yapılmış, Python tabanlı profesyonel video düzenleme aracı.
+Python tabanlı profesyonel video düzenleme aracı.
 
 ## ✨ Özellikler
 
