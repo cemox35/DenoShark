@@ -190,7 +190,6 @@ Video Yükle → Ses Çıkar → Gürültü Azalt → Altyazı Oluştur
 
 - [ ] Voicecraft entegrasyonu (Ses klonlama)
 - [ ] XTTS v2 entegrasyonu (Metin-Ses)
-- [ ] YOLO v8 entegrasyonu (Yüz tespiti)
 - [ ] Video birleştirme (Concat)
 - [ ] Efekt ekleme (Transitions, Filters)
 - [ ] Batch işleme
@@ -214,11 +213,3 @@ Katkılarınız memnuniyetle karşılanır!
 ## 📞 Destek
 
 Sorun veya önerileriniz için GitHub Issues'de yazın.
-
-## 💝 Nişanlıma Armağan
-
-Bu proje, nişanlım için yapılmış bir aşk gösterisidir. 💕
-
----
-
-Made with ❤️ for my future wife
