@@ -1,0 +1,29 @@
+# GUI Framework
+PyQt6==6.6.1
+PyQt6-Qt6==6.6.1
+
+# Video Processing
+opencv-python==4.8.1.78
+moviepy==2.2.1
+imageio==2.34.0
+imageio-ffmpeg==0.4.9
+
+# Audio Processing
+librosa==0.10.0
+soundfile==0.12.1
+scipy==1.14.0
+numpy==1.26.0
+
+# AI Models (En son sürümleri, Python 3.12 uyumlu)
+openai-whisper>=20240930
+torch>=2.0.0
+torchaudio>=2.0.0
+
+# Utilities
+pydub==0.25.1
+python-dotenv==1.0.0
+pyyaml==6.0.1
+Pillow==10.1.0
+
+# FFmpeg wrapper
+ffmpeg-python==0.2.0
