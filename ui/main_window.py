@@ -392,6 +392,22 @@ class MainWindow(QMainWindow):
         self.project_manager.auto_save(str(TEMP_DIR))
         logger.info("Auto-save completed.")
         
+    def _on_timeline_changed(self, mix_data):
+        """Called when timeline changes. Save to current project if set, otherwise autosave."""
+        try:
+            if hasattr(self, 'project_manager') and self.project_manager and self.project_manager.current_project_path:
+                # Save silently to the existing project file
+                self.project_manager.save_project(self.project_manager.current_project_path)
+                logger.info("Timeline change saved to current project.")
+                try:
+                    self.statusBar().showMessage("Project saved.", 1500)
+                except Exception:
+                    pass
+            else:
+                self._perform_auto_save()
+        except Exception as e:
+            logger.error(f"Error saving project on timeline change: {e}")
+        
     def new_project(self):
         reply = QMessageBox.question(self, 'New Project', 'Are you sure you want to clear current workspace?',
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
@@ -628,7 +644,9 @@ class MainWindow(QMainWindow):
         from ui.widgets import RealTimeAudioEngine
         self.audio_engine = RealTimeAudioEngine()
         self.multi_track_timeline.timeline_changed.connect(self.audio_engine.sync_clips)
-        self.multi_track_timeline.timeline_changed.connect(self._perform_auto_save)
+        # Ensure timeline edits persist to the open project file when available;
+        # fallback to auto-save to temp if no project file yet.
+        self.multi_track_timeline.timeline_changed.connect(self._on_timeline_changed)
         
         # Mute original video
         self.audio_timeline_widget.audio_output.setVolume(0.0)

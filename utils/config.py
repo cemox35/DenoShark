@@ -32,7 +32,7 @@ AUDIO_NORMALIZATION_LEVEL = -20.0  # dB
 WHISPER_MODEL = "base"  # tiny, base, small, medium, large
 XTTS_MODEL = "v2"
 WHISPER_LANGUAGE = "tr"  # Türkçe
-USE_GPU = True
+USE_GPU = False  # CUDA DLL hatası olduğundan CPU modunda çalıştırılıyor
 
 # PyQt6 Arayüz Ayarları
 WINDOW_WIDTH = 1200

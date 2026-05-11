@@ -26,7 +26,7 @@ class SpeechRecognizer:
         "medium": "medium"
     }
     
-    def __init__(self, model_name: str = "base", device: str = "cuda"):
+    def __init__(self, model_name: str = "base", device: str = "cpu"):
         """
         faster-whisper modelini yükle
         
