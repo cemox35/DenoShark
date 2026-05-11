@@ -239,11 +239,20 @@ class MainWindow(QMainWindow):
         sidebar_layout.setContentsMargins(0, 30, 0, 20)
         sidebar_layout.setSpacing(5)
         
-        # App Title in Sidebar
-        title_label = QLabel("🦈 " + APP_NAME)
-        title_label.setFont(QFont("Segoe UI", 22, QFont.Weight.Bold))
-        title_label.setStyleSheet("color: #ffffff; padding-left: 15px; margin-bottom: 30px;")
-        sidebar_layout.addWidget(title_label)
+        # App Title / Logo in Sidebar
+        logo_label = QLabel()
+        logo_path = Path("img/logo.png")
+        if logo_path.exists():
+            pixmap = QPixmap(str(logo_path))
+            scaled_pixmap = pixmap.scaledToHeight(125, Qt.TransformationMode.SmoothTransformation)
+            logo_label.setPixmap(scaled_pixmap)
+            logo_label.setStyleSheet("padding-left: 10px; margin-bottom: 30px;")
+        else:
+            logo_label.setText("🦈 " + APP_NAME)
+            logo_label.setFont(QFont("Segoe UI", 22, QFont.Weight.Bold))
+            logo_label.setStyleSheet("color: #ffffff; padding-left: 15px; margin-bottom: 30px;")
+        
+        sidebar_layout.addWidget(logo_label)
         
         # Navigation Buttons
         self.nav_buttons = []
