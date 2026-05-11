@@ -333,23 +333,14 @@ class AdvancedVideoTrimmer(QWidget):
         ext = Path(path).suffix.lower()
         is_audio = ext in ['.mp3', '.wav', '.aac', '.ogg', '.m4a']
         
-        # Eski player'ı tamamen yıkıp yeniden oluştur.
-        # Bu, pause()+setSource() kombinasyonunun Qt/FFmpeg backend'de
-        # oluşturduğu deadlock'ı tamamen önler.
-        self.media_player.positionChanged.disconnect()
-        self.media_player.durationChanged.disconnect()
-        self.media_player.setSource(QUrl())
-        self.media_player.deleteLater()
-        self.audio_output.deleteLater()
-
-        self.media_player = QMediaPlayer()
-        self.audio_output = QAudioOutput()
-        self.media_player.setAudioOutput(self.audio_output)
-        self.media_player.positionChanged.connect(self.position_changed)
-        self.media_player.durationChanged.connect(self.duration_changed)
-
-        self.alt_media_player.setSource(QUrl())
+        # Donmayı engellemek için player'ı tamamen yeniden oluşturmak yerine
+        # sadece yeni kaynağa ayarla
+        self.media_player.stop()
+        self.alt_media_player.stop()
         
+        QTimer.singleShot(50, lambda: self._apply_new_source(path, is_audio))
+        
+    def _apply_new_source(self, path: str, is_audio: bool):
         if is_audio:
             self.media_player.setVideoOutput(None)
             self.placeholder_label.setText("🎵\nSes Dosyası")
