@@ -20,15 +20,56 @@ class ProjectManager:
             "timeline": self._get_timeline()
         }
         
+        # Projenin bir küçük resmini (thumbnail/logo) base64 olarak JSON'a ekle ve yanına resim olarak çıkar
+        thumbnail_data = self._generate_project_thumbnail()
+        if thumbnail_data:
+            state["thumbnail_base64"] = thumbnail_data
+            
         try:
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(state, f, ensure_ascii=False, indent=4)
+                
+            # Eğer kullanıcı klasörde görmek isterse diye proje dosyasının yanına .png olarak logoyu da kaydedelim
+            if thumbnail_data:
+                try:
+                    import base64
+                    png_path = str(Path(file_path).with_suffix('.png'))
+                    with open(png_path, "wb") as img_file:
+                        img_file.write(base64.b64decode(thumbnail_data))
+                except Exception as e:
+                    print(f"Error saving thumbnail image: {e}")
+                    
             self.current_project_path = file_path
             self.last_used_directory = str(Path(file_path).parent)
             return True
         except Exception as e:
             print(f"Error saving project: {e}")
             return False
+
+    def _generate_project_thumbnail(self) -> str:
+        """Kullanıcının isteği üzerine img/logo-small.png dosyasını projenin küçük resmi (logo) olarak ayarlar."""
+        import base64
+        import os
+        from PyQt6.QtCore import QByteArray, QBuffer, QIODevice
+        from PyQt6.QtGui import QPixmap
+        
+        try:
+            # Projedeki varsayılan logoyu yükle
+            logo_path = os.path.join(os.getcwd(), 'img', 'logo-small.png')
+            if not os.path.exists(logo_path):
+                 return ""
+                 
+            pixmap = QPixmap(logo_path)
+            
+            # Base64 string'e dönüştür
+            byte_array = QByteArray()
+            buffer = QBuffer(byte_array)
+            buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+            pixmap.save(buffer, "PNG")
+            return base64.b64encode(byte_array.data()).decode('utf-8')
+        except Exception as e:
+            print(f"Error generating thumbnail: {e}")
+            return ""
 
     def load_project(self, file_path: str):
         """Loads a .deno project and reconstructs the workspace."""

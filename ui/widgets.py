@@ -648,6 +648,13 @@ class MediaPoolWidget(QFrame):
     def on_item_double_clicked(self, item):
         path = item.data(Qt.ItemDataRole.UserRole)
         self.media_selected.emit(path)
+    
+    def get_selected_file(self) -> str:
+        """Medya Pool'da şu anda seçili olan dosyanın yolunu döndür"""
+        current_item = self.list_widget.currentItem()
+        if current_item:
+            return current_item.data(Qt.ItemDataRole.UserRole)
+        return None
 
 # --- NLE Commands ---
 class MoveClipCommand(QUndoCommand):

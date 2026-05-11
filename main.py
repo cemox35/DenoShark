@@ -38,6 +38,46 @@ def global_exception_handler(exc_type, exc_value, exc_traceback):
     msg_box.addButton("Tamam", QMessageBox.ButtonRole.AcceptRole)
     msg_box.exec()
 
+def register_win_extension():
+    """Windows kayıt defterine .deno uzantısını ve ikonunu kaydeder"""
+    if sys.platform != "win32":
+        return
+        
+    try:
+        import winreg
+        import os
+        import ctypes
+        from PyQt6.QtGui import QImage
+        
+        icon_path = os.path.abspath(r"img\logo-small.ico")
+        png_path = os.path.abspath(r"img\logo-small.png")
+        
+        # Windows ikon formatı için .ico gerekir, eğer yoksa png'den çevir
+        if not os.path.exists(icon_path) and os.path.exists(png_path):
+            img = QImage(png_path)
+            img.save(icon_path, "ICO")
+            
+        if os.path.exists(icon_path):
+            # Uzantıyı kaydet
+            key_path = r"Software\Classes\.deno"
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+                winreg.SetValue(key, "", winreg.REG_SZ, "DenoShark.Project")
+                
+            prog_key_path = r"Software\Classes\DenoShark.Project"
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, prog_key_path) as key:
+                winreg.SetValue(key, "", winreg.REG_SZ, "DenoShark Projesi")
+                
+            # İkonu belirle
+            icon_key_path = r"Software\Classes\DenoShark.Project\DefaultIcon"
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, icon_key_path) as key:
+                winreg.SetValue(key, "", winreg.REG_SZ, f'"{icon_path}"')
+                
+            # Explorer'a ikon önbelleğini güncellemesini söyle (Anında görünmesi için)
+            # SHCNE_ASSOCCHANGED = 0x08000000, SHCNF_IDLIST = 0x0000
+            ctypes.windll.shell32.SHChangeNotify(0x08000000, 0x0000, None, None)
+    except Exception as e:
+        logger.error(f"Uzantı kaydedilemedi: {e}")
+
 def main():
     """Uygulamayı başlat"""
     # Global exception handler'ı sys.excepthook'a bağla
@@ -61,6 +101,9 @@ def main():
     icon_path = Path("img/logo-small.png")
     if icon_path.exists():
         app.setWindowIcon(QIcon(str(icon_path)))
+        
+    # Windows'ta .deno dosyaları için logoyu entegre et
+    register_win_extension()
         
     window = MainWindow()
     window.show()

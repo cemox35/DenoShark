@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QSlider, QSpinBox, QDoubleSpinBox,
     QFileDialog, QProgressBar, QStackedWidget, QTableWidget,
     QTableWidgetItem, QGroupBox, QComboBox, QCheckBox, QFrame,
-    QSpacerItem, QSizePolicy, QSplitter, QMessageBox
+    QSpacerItem, QSizePolicy, QSplitter, QMessageBox, QTextEdit
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize, QTimer
 from PyQt6.QtGui import QFont, QIcon, QPixmap, QAction, QKeySequence
@@ -248,6 +248,51 @@ class DenoiseWorker(QThread):
         )
         self.finished.emit(result)
 
+class WhisperWorker(QThread):
+    """faster-whisper transkripsiyon worker (non-blocking)"""
+    status_changed = pyqtSignal(str)  # Durum mesajı
+    progress = pyqtSignal(int)  # 0-100 ilerleme
+    finished = pyqtSignal(bool, str)  # Başarılı, Dosya yolu
+    
+    def __init__(self, audio_path: str, output_srt: str, model_size: str = "base", language: str = None):
+        super().__init__()
+        self.audio_path = audio_path
+        self.output_srt = output_srt
+        self.model_size = model_size
+        self.language = language
+        
+    def run(self):
+        try:
+            from ai_module.speech_recognition import SpeechRecognizer
+            
+            self.status_changed.emit(f"📥 Model yükleniyor ({self.model_size})...")
+            self.progress.emit(10)
+            
+            recognizer = SpeechRecognizer(model_name=self.model_size)
+            
+            self.status_changed.emit(f"🎤 Transkripsiyon başlatılıyor...")
+            self.progress.emit(30)
+            
+            success = recognizer.save_srt(
+                self.audio_path,
+                self.output_srt,
+                language=self.language
+            )
+            
+            if success:
+                self.progress.emit(100)
+                self.status_changed.emit(f"✅ Altyazılar başarıyla oluşturuldu!")
+                self.status_changed.emit(f"📁 Dosya: {self.output_srt}")
+                self.finished.emit(True, self.output_srt)
+            else:
+                self.status_changed.emit(f"❌ Transkripsiyon başarısız oldu.")
+                self.finished.emit(False, "")
+                
+        except Exception as e:
+            logger.error(f"WhisperWorker hatası: {e}")
+            self.status_changed.emit(f"❌ Hata: {str(e)}")
+            self.finished.emit(False, "")
+
 class MainWindow(QMainWindow):
     """Ana pencere"""
     
@@ -265,7 +310,44 @@ class MainWindow(QMainWindow):
         
     def _init_menu_bar(self):
         menubar = self.menuBar()
-        menubar.setStyleSheet("background-color: #121212; color: #e0e0e0; border-bottom: 1px solid #2a2a2a;")
+        menubar.setStyleSheet("""
+            QMenuBar {
+                background-color: #121212; 
+                color: #e0e0e0; 
+                border-bottom: 1px solid #2a2a2a;
+            }
+            QMenuBar::item {
+                background-color: transparent;
+                padding: 6px 10px;
+                border-radius: 4px;
+            }
+            QMenuBar::item:selected {
+                background-color: #252525;
+                color: #00a8ff;
+            }
+            QMenuBar::item:pressed {
+                background-color: #333333;
+            }
+            QMenu {
+                background-color: #1a1a1a;
+                color: #e0e0e0;
+                border: 1px solid #2a2a2a;
+                border-radius: 4px;
+                padding: 4px 0px;
+            }
+            QMenu::item {
+                padding: 6px 24px 6px 24px;
+            }
+            QMenu::item:selected {
+                background-color: #00a8ff;
+                color: white;
+            }
+            QMenu::separator {
+                height: 1px;
+                background-color: #2a2a2a;
+                margin: 4px 0px;
+            }
+        """)
         
         # File Menu
         file_menu = menubar.addMenu("File")
@@ -659,16 +741,6 @@ class MainWindow(QMainWindow):
         denoise_group.setLayout(denoise_layout)
         right_tools_layout.addWidget(denoise_group)
         
-        # Ses karıştırma
-        mix_group = QGroupBox("3. Ses Ekleme")
-        mix_layout = QVBoxLayout()
-        mix_btn = QPushButton("🎵 Arka Plan Sesi Ekle")
-        mix_btn.setObjectName("primary_action")
-        mix_btn.clicked.connect(self.mix_audio)
-        mix_layout.addWidget(mix_btn)
-        mix_group.setLayout(mix_layout)
-        right_tools_layout.addWidget(mix_group)
-        
         right_tools_layout.addStretch()
         tools_layout.addLayout(right_tools_layout)
         
@@ -683,68 +755,299 @@ class MainWindow(QMainWindow):
         return widget
     
     def _create_ai_tab(self):
-        """AI araçları sekmesi"""
+        """AI araçları sekmesi (faster-whisper ile transkripsiyon)"""
         widget = QWidget()
         layout = QVBoxLayout()
         layout.setSpacing(20)
         
-        title = QLabel("AI Araçları")
+        title = QLabel("🤖 AI Araçları - Otomatik Altyazı")
         title.setFont(QFont("Segoe UI", 24, QFont.Weight.Bold))
         title.setStyleSheet("color: #ffffff; margin-bottom: 10px;")
         layout.addWidget(title)
         
-        # Otomatik altyazı
-        subtitle_group = QGroupBox("Otomatik Altyazı (Whisper)")
+        # Otomatik altyazı (faster-whisper)
+        subtitle_group = QGroupBox("Otomatik Altyazı Oluşturma (faster-whisper)")
         subtitle_layout = QVBoxLayout()
         subtitle_layout.setSpacing(15)
         
-        subtitle_info = QLabel("Videonuzdaki sesi analiz edip saniyeler içinde SRT altyazı dosyası üretir.")
+        subtitle_info = QLabel(
+            "Ses dosyasını transkribe etip SRT formatında altyazı dosyası oluşturun.\n"
+            "Model boyutu küçüldükçe işlem hızlanır (tiny: en hızlı, medium: en doğru)."
+        )
         subtitle_info.setWordWrap(True)
+        subtitle_info.setStyleSheet("color: #cccccc; font-size: 13px;")
         subtitle_layout.addWidget(subtitle_info)
         
-        subtitle_btn = QPushButton("📝 Altyazı Oluştur")
-        subtitle_btn.setObjectName("primary_action")
-        subtitle_btn.clicked.connect(self.generate_subtitles)
-        subtitle_layout.addWidget(subtitle_btn)
+        # Model seçimi
+        model_layout = QHBoxLayout()
+        model_label = QLabel("📦 Model Boyutu:")
+        model_label.setFixedWidth(120)
+        self.whisper_model_combo = QComboBox()
+        self.whisper_model_combo.addItems(["tiny", "base", "small", "medium"])
+        self.whisper_model_combo.setCurrentText("base")
+        self.whisper_model_combo.setStyleSheet("padding: 5px;")
+        model_layout.addWidget(model_label)
+        model_layout.addWidget(self.whisper_model_combo)
+        model_layout.addStretch()
+        subtitle_layout.addLayout(model_layout)
+        
+        # Dil seçimi
+        lang_layout = QHBoxLayout()
+        lang_label = QLabel("🌐 Dil:")
+        lang_label.setFixedWidth(120)
+        self.whisper_lang_combo = QComboBox()
+        self.whisper_lang_combo.addItems(["Otomatik", "Türkçe (tr)", "İngilizce (en)", "Arapça (ar)"])
+        self.whisper_lang_combo.setStyleSheet("padding: 5px;")
+        lang_layout.addWidget(lang_label)
+        lang_layout.addWidget(self.whisper_lang_combo)
+        lang_layout.addStretch()
+        subtitle_layout.addLayout(lang_layout)
+        
+        # Console çıktısı
+        console_label = QLabel("📋 İşlem Günlüğü:")
+        console_label.setStyleSheet("color: #00a8ff; font-weight: bold;")
+        subtitle_layout.addWidget(console_label)
+        
+        self.whisper_console = QTextEdit()
+        self.whisper_console.setReadOnly(True)
+        self.whisper_console.setMaximumHeight(150)
+        self.whisper_console.setStyleSheet("""
+            QTextEdit {
+                background-color: #0d0d0d;
+                color: #00ff00;
+                border: 1px solid #2a2a2a;
+                border-radius: 4px;
+                font-family: 'Courier New', monospace;
+                font-size: 11px;
+                padding: 8px;
+            }
+        """)
+        self.whisper_console.setText("➤ Hazır. Ses dosyası seçip 'Altyazı Oluştur' butonuna basın.\n")
+        subtitle_layout.addWidget(self.whisper_console)
+        
+        # İlerleme çubuğu
+        self.whisper_progress = QProgressBar()
+        self.whisper_progress.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #2a2a2a;
+                border-radius: 4px;
+                background-color: #1a1a1a;
+                color: #00a8ff;
+            }
+            QProgressBar::chunk {
+                background-color: #00a8ff;
+                border-radius: 3px;
+            }
+        """)
+        self.whisper_progress.setValue(0)
+        self.whisper_progress.setVisible(False)
+        subtitle_layout.addWidget(self.whisper_progress)
+        
+        # Butonlar
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        self.btn_generate_subtitles = QPushButton("📝 Altyazı Oluştur")
+        self.btn_generate_subtitles.setObjectName("primary_action")
+        self.btn_generate_subtitles.setMinimumHeight(40)
+        self.btn_generate_subtitles.clicked.connect(self.start_subtitle_generation)
+        button_layout.addWidget(self.btn_generate_subtitles)
+        
+        button_layout.addStretch()
+        subtitle_layout.addLayout(button_layout)
         
         subtitle_group.setLayout(subtitle_layout)
         layout.addWidget(subtitle_group)
         
-        # XTTS
-        tts_group = QGroupBox("Metin-Ses (XTTS v2)")
-        tts_layout = QVBoxLayout()
-        tts_layout.setSpacing(15)
+        # Gelecek: XTTS ve Voicecraft (placeholder)
+        future_group = QGroupBox("🚀 Yakında Gelecek Özellikler")
+        future_layout = QVBoxLayout()
+        future_layout.setSpacing(10)
         
-        tts_info = QLabel("Gelişmiş AI ses klonlama teknolojisi. Metninizi seçilen sesle okutun. (Çok Yakında)")
+        tts_info = QLabel("🎤 Metin-Ses (XTTS v2): Metninizi doğal sesle okutun (Geliştirilmekte)")
         tts_info.setWordWrap(True)
-        tts_layout.addWidget(tts_info)
+        tts_info.setStyleSheet("color: #cccccc;")
+        future_layout.addWidget(tts_info)
         
-        tts_btn = QPushButton("🎤 Metni Sese Dönüştür")
-        tts_btn.setEnabled(False)
-        tts_layout.addWidget(tts_btn)
+        vc_info = QLabel("🎧 Ses Klonlama (Voicecraft): Sesinizi klonlayın (Geliştirilmekte)")
+        vc_info.setWordWrap(True)
+        vc_info.setStyleSheet("color: #cccccc;")
+        future_layout.addWidget(vc_info)
         
-        tts_group.setLayout(tts_layout)
-        layout.addWidget(tts_group)
-        
-        # Voicecraft
-        vc_group = QGroupBox("Ses Klonlama (Voicecraft)")
-        vc_layout = QVBoxLayout()
-        vc_layout.setSpacing(15)
-        
-        vc_btn = QPushButton("🎧 Ses Klonla (Hazırlanıyor)")
-        vc_btn.setEnabled(False)
-        vc_layout.addWidget(vc_btn)
-        
-        vc_group.setLayout(vc_layout)
-        layout.addWidget(vc_group)
-        
-        self.ai_progress = QProgressBar()
-        self.ai_progress.hide()
-        layout.addWidget(self.ai_progress)
+        future_group.setLayout(future_layout)
+        layout.addWidget(future_group)
         
         layout.addStretch()
         widget.setLayout(layout)
         return widget
+    
+    def _get_audio_for_transcription(self) -> tuple:
+        """
+        Altyazı oluşturmak için gerekli ses dosyasını otomatik olarak bul.
+        Öncelik: Mevcut ses > Medya Pool seçimi > Zaman çizelgesi > Video'dan ses çıkarma
+        
+        Returns: (audio_path: str, source_name: str) or (None, error_msg) if failed
+        """
+        try:
+            # 1. Mevcut ses dosyası var mı?
+            if self.current_audio_path and Path(self.current_audio_path).exists():
+                source_name = Path(self.current_audio_path).name
+                logger.info(f"Ses bulundu (current): {source_name}")
+                return self.current_audio_path, source_name
+            
+            # 2. Medya Pool'da seçili ses dosyası var mı?
+            if hasattr(self, 'media_pool') and self.media_pool:
+                selected_file = self.media_pool.get_selected_file()
+                if selected_file and Path(selected_file).exists():
+                    ext = Path(selected_file).suffix.lower()
+                    audio_extensions = {'.mp3', '.wav', '.aac', '.ogg', '.m4a', '.flac', '.wma'}
+                    if ext in audio_extensions:
+                        source_name = Path(selected_file).name
+                        logger.info(f"Ses bulundu (Media Pool): {source_name}")
+                        return selected_file, source_name
+            
+            # 3. Zaman çizelgesinde ana video var mı?
+            if hasattr(self, 'multi_track_timeline') and self.multi_track_timeline:
+                if self.multi_track_timeline.main_video_path:
+                    video_path = self.multi_track_timeline.main_video_path
+                    if Path(video_path).exists():
+                        logger.info(f"Video bulundu (Timeline): {Path(video_path).name}, ses çıkarılıyor...")
+                        return self._auto_extract_audio(video_path), Path(video_path).name
+            
+            # 4. Mevcut video var mı? Ses çıkar
+            if self.current_video_path and Path(self.current_video_path).exists():
+                logger.info(f"Video bulundu (current): {Path(self.current_video_path).name}, ses çıkarılıyor...")
+                return self._auto_extract_audio(self.current_video_path), Path(self.current_video_path).name
+            
+            # 5. Ses sekmesindeki video var mı?
+            if hasattr(self, 'audio_video_path') and self.audio_video_path and Path(self.audio_video_path).exists():
+                logger.info(f"Video bulundu (Audio Tab): {Path(self.audio_video_path).name}, ses çıkarılıyor...")
+                return self._auto_extract_audio(self.audio_video_path), Path(self.audio_video_path).name
+            
+            # Hiçbir kaynak bulunamadı
+            return None, "❌ Ses veya video dosyası bulunamadı. Lütfen önce bir medya yükleyin."
+            
+        except Exception as e:
+            logger.error(f"Ses algılama hatası: {e}")
+            return None, f"❌ Hata: {str(e)[:80]}"
+    
+    def _auto_extract_audio(self, video_path: str) -> str:
+        """Video'dan geçici ses dosyası çıkar"""
+        try:
+            TEMP_DIR.mkdir(exist_ok=True)
+            video_name = Path(video_path).stem
+            temp_audio = str(TEMP_DIR / f"whisper_temp_{video_name}.wav")
+            
+            # Video'nun sadece ilk 30 saniyesini kullan (preview), full transkripsiyon için tüm videoyu kullan
+            extractor = AudioExtractor()
+            self.statusBar().showMessage("🎤 Ses dosyası otomatik olarak çıkarılıyor...")
+            
+            success = extractor.extract(video_path, temp_audio, start_time=0, end_time=None)
+            
+            if success and Path(temp_audio).exists():
+                logger.info(f"Ses başarıyla çıkarıldı: {temp_audio}")
+                return temp_audio
+            else:
+                raise Exception("Ses çıkarma başarısız")
+                
+        except Exception as e:
+            logger.error(f"Ses çıkarma hatası: {e}")
+            raise
+    
+    def start_subtitle_generation(self):
+        """Whisper worker'ı başlat (akıllı ses algılama ile)"""
+        # Ses dosyasını otomatik olarak bul
+        audio_path, source_info = self._get_audio_for_transcription()
+        
+        if not audio_path:
+            QMessageBox.warning(
+                self, 
+                "Ses Bulunamadı", 
+                source_info  # source_info hata mesajı içeriyor
+            )
+            return
+        
+        audio_file = Path(audio_path)
+        default_output = str(Path("output") / f"{audio_file.stem}.srt")
+        
+        output_srt, _ = QFileDialog.getSaveFileName(
+            self,
+            "Altyazıyı Kaydet",
+            default_output,
+            "SRT Dosyası (*.srt)"
+        )
+        
+        if not output_srt:
+            return
+        
+        # Dil parametresini ayarla
+        lang_text = self.whisper_lang_combo.currentText()
+        language = None
+        if "Türkçe" in lang_text:
+            language = "tr"
+        elif "İngilizce" in lang_text:
+            language = "en"
+        elif "Arapça" in lang_text:
+            language = "ar"
+        
+        model_size = self.whisper_model_combo.currentText()
+        
+        # UI'yi devre dışı bırak
+        self.btn_generate_subtitles.setEnabled(False)
+        self.whisper_model_combo.setEnabled(False)
+        self.whisper_lang_combo.setEnabled(False)
+        self.whisper_progress.setVisible(True)
+        self.whisper_progress.setValue(0)
+        
+        # Console'u temizle ve başlangıç mesajı
+        self.whisper_console.clear()
+        self.whisper_console.append(f"📌 Kaynak: {source_info}")
+        self.whisper_console.append(f"📁 Ses: {audio_file.name}")
+        self.whisper_console.append(f"Model: {model_size} | Dil: {lang_text}\n")
+        self.whisper_console.append("▶ İşlem başlatılıyor...\n")
+        
+        # Worker başlat
+        self.whisper_worker = WhisperWorker(
+            audio_path,
+            output_srt,
+            model_size=model_size,
+            language=language
+        )
+        self.whisper_worker.status_changed.connect(self._on_whisper_status)
+        self.whisper_worker.progress.connect(self._on_whisper_progress)
+        self.whisper_worker.finished.connect(self._on_whisper_finished)
+        self.whisper_worker.start()
+    
+    def _on_whisper_status(self, message: str):
+        """Whisper worker'dan durum mesajı al"""
+        self.whisper_console.append(message)
+        # Scroll down
+        self.whisper_console.verticalScrollBar().setValue(
+            self.whisper_console.verticalScrollBar().maximum()
+        )
+    
+    def _on_whisper_progress(self, value: int):
+        """İlerleme güncellemesi"""
+        self.whisper_progress.setValue(value)
+    
+    def _on_whisper_finished(self, success: bool, output_path: str):
+        """Whisper worker tamamlandı"""
+        # UI'yi etkinleştir
+        self.btn_generate_subtitles.setEnabled(True)
+        self.whisper_model_combo.setEnabled(True)
+        self.whisper_lang_combo.setEnabled(True)
+        
+        if success:
+            self.statusBar().showMessage(f"✅ Altyazılar başarıyla oluşturuldu: {Path(output_path).name}", 5000)
+            self.whisper_console.append(f"\n✅ Altyazılar başarıyla kaydedildi!")
+            QMessageBox.information(
+                self,
+                "Başarılı",
+                f"Altyazılar başarıyla oluşturuldu!\n\n📁 {output_path}"
+            )
+        else:
+            self.statusBar().showMessage("❌ Altyazı oluşturma başarısız oldu.", 5000)
+            self.whisper_console.append(f"\n❌ Altyazı oluşturma başarısız!")
     
     def _create_settings_tab(self):
         """Ayarlar sekmesi"""
@@ -814,8 +1117,13 @@ class MainWindow(QMainWindow):
         res_label = QLabel("🖥️ Çözünürlük:")
         res_label.setFixedWidth(120)
         self.export_res_combo = QComboBox()
-        self.export_res_combo.addItems(["Orijinal", "1080p (FHD)", "720p (HD)", "4K (UHD)", "Küçültülmüş (480p)"])
-        self.export_res_combo.setStyleSheet("padding: 5px;")
+        self.export_res_combo.setEditable(True)
+        self.export_res_combo.addItems(["Orijinal", "1920x1080 (Yatay FHD)", "1080x1920 (Dikey FHD/Tiktok)", "1280x720 (Yatay HD)", "720x1280 (Dikey HD/Tiktok)", "3840x2160 (4K UHD)"])
+        self.export_res_combo.lineEdit().setPlaceholderText("Veya özel değer yazın (örn: 1080x1920)")
+        self.export_res_combo.setStyleSheet("""
+            QComboBox { padding: 5px; }
+            QComboBox QLineEdit { color: #e0e0e0; background-color: transparent; }
+        """)
         res_layout.addWidget(res_label)
         res_layout.addWidget(self.export_res_combo)
         export_layout.addLayout(res_layout)
@@ -1184,35 +1492,5 @@ class MainWindow(QMainWindow):
                 logger.error(f"Ses ekleme hatası: {e}")
                 self.statusBar().showMessage("❌ Ses dosyası eklenemedi")
     
-    def generate_subtitles(self):
-        """Otomatik altyazı oluştur"""
-        if not self.current_audio_path:
-            self.statusBar().showMessage("Lütfen önce bir video seçip ses çıkarın")
-            return
-        
-        audio_name = Path(self.current_audio_path).stem
-        default_path = str(Path.home() / "Desktop" / f"{audio_name}.srt")
-        
-        output_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Altyazıları Kaydet",
-            default_path,
-            "SRT Dosyası (*.srt)"
-        )
-        
-        if output_path:
-            self.statusBar().showMessage("Altyazılar oluşturuluyor... (2-3 dakika alabilir)")
-            logger.info(f"Altyazı oluşturma başlatılıyor: {self.current_audio_path}")
-            
-            try:
-                from ai_module import SpeechRecognizer
-                recognizer = SpeechRecognizer()
-                success = recognizer.save_srt(self.current_audio_path, output_path)
-                
-                if success:
-                    self.statusBar().showMessage(f"✅ Altyazılar oluşturuldu: {Path(output_path).name}")
-                else:
-                    self.statusBar().showMessage("❌ Altyazılar oluşturulamadı")
-            except Exception as e:
-                logger.error(f"Altyazı oluşturulamadı: {e}")
-                self.statusBar().showMessage(f"❌ Hata: {str(e)[:50]}")
+    
+    # (generate_subtitles method removed - replaced with start_subtitle_generation)
