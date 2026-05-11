@@ -5,7 +5,13 @@ DenoShark - Nişanlı için Video Düzenleme Uygulaması
 Ana giriş noktası
 """
 import sys
+import warnings
 from pathlib import Path
+
+# imageio_ffmpeg ve pkg_resources uyarılarını gizle
+warnings.filterwarnings("ignore", category=UserWarning, module="imageio_ffmpeg")
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QIcon
 from ui import MainWindow
