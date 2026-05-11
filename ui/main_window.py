@@ -298,12 +298,13 @@ class ExportWorker(QThread):
     progress = pyqtSignal(int)
     finished = pyqtSignal(bool, str)
     
-    def __init__(self, input_video: str, output_video: str, quality: str, subtitle_file: str = None):
+    def __init__(self, input_video: str, output_video: str, quality: str, subtitle_file: str = None, subtitle_opts: dict = None):
         super().__init__()
         self.input_video = input_video
         self.output_video = output_video
         self.quality = quality
         self.subtitle_file = subtitle_file
+        self.subtitle_opts = subtitle_opts or {}
 
     def run(self):
         try:
@@ -326,10 +327,15 @@ class ExportWorker(QThread):
                 # quality string'ine göre bitrate/fps seçilebilir, şimdilik sabit
                 ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
                 
+                # Stil ayarlarını hazırla
+                fontsize = self.subtitle_opts.get("fontsize", 24)
+                margin_v = self.subtitle_opts.get("margin_v", 30)
+                force_style = f"FontSize={fontsize},MarginV={margin_v},FontName=Arial,PrimaryColour=&H00FFFFFF"
+                
                 cmd = [
                     ffmpeg_exe, "-y", 
                     "-i", self.input_video,
-                    "-vf", f"subtitles={sub_path}",
+                    "-vf", f"subtitles={sub_path}:force_style='{force_style}'",
                     "-c:v", "libx264",
                     "-preset", "fast",
                     "-c:a", "aac",
@@ -1246,6 +1252,29 @@ class MainWindow(QMainWindow):
         
         export_layout.addLayout(subtitle_layout)
         
+        # Altyazı stil ayarları (Boyut ve Yükseklik)
+        self.subtitle_style_layout = QHBoxLayout()
+        
+        lbl_fontsize = QLabel("Altyazı Büyüklüğü:")
+        self.spin_fontsize = QSpinBox()
+        self.spin_fontsize.setRange(10, 150)
+        self.spin_fontsize.setValue(24)
+        
+        lbl_margin_v = QLabel("Yükseklik (Aşağıdan Yukarı):")
+        self.spin_margin_v = QSpinBox()
+        self.spin_margin_v.setRange(0, 500)
+        self.spin_margin_v.setValue(30)
+        self.spin_margin_v.setToolTip("Değer arttıkça altyazı videonun yukarısına doğru çıkar.")
+        
+        self.subtitle_style_layout.addWidget(lbl_fontsize)
+        self.subtitle_style_layout.addWidget(self.spin_fontsize)
+        self.subtitle_style_layout.addSpacing(20)
+        self.subtitle_style_layout.addWidget(lbl_margin_v)
+        self.subtitle_style_layout.addWidget(self.spin_margin_v)
+        self.subtitle_style_layout.addStretch()
+        
+        export_layout.addLayout(self.subtitle_style_layout)
+        
         export_group.setLayout(export_layout)
         layout.addWidget(export_group)
         
@@ -1301,12 +1330,18 @@ class MainWindow(QMainWindow):
             
             subtitle_file = getattr(self, 'export_subtitle_path_value', None) if self.export_add_subtitle_cmd.isChecked() else None
             
+            # Altyazı opsiyonları
+            subtitle_opts = {
+                "fontsize": self.spin_fontsize.value(),
+                "margin_v": self.spin_margin_v.value()
+            }
+            
             self.statusBar().showMessage(f"Dışa aktarma başlatıldı: {file_path}")
             self.export_progress.show()
             self.export_progress.setValue(10)
             
             # Thread başlat
-            self.export_thread = ExportWorker(input_video, file_path, quality, subtitle_file)
+            self.export_thread = ExportWorker(input_video, file_path, quality, subtitle_file, subtitle_opts)
             self.export_thread.progress.connect(self.export_progress.setValue)
             self.export_thread.finished.connect(self.on_export_finished)
             self.export_thread.start()
