@@ -1,33 +1,56 @@
 """
 Custom Widgets - Özel PyQt6 bileşenleri
 """
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider, QSpinBox
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider, QSpinBox, QFrame, QFileDialog
 from PyQt6.QtCore import Qt, pyqtSignal, QMimeData
 from PyQt6.QtGui import QPixmap, QImage, QDrag
 import cv2
 from pathlib import Path
 
-class VideoDragDropWidget(QWidget):
-    """Sürükle-bırak destekli video yükleme widget'ı"""
+class MediaFileDropper(QFrame):
+    """Sürükle-bırak ve tıklama destekli gelişmiş medya yükleme widget'ı"""
     
-    video_dropped = pyqtSignal(str)  # Video yolu sinyal
+    file_dropped = pyqtSignal(str)
     
     def __init__(self):
         super().__init__()
         self.setAcceptDrops(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.init_ui()
     
     def init_ui(self):
-        layout = QVBoxLayout()
+        self.setObjectName("media_dropper")
+        self.setStyleSheet("""
+            #media_dropper {
+                background-color: #1e1e1e;
+                border: 2px dashed #3a3a3a;
+                border-radius: 12px;
+            }
+            #media_dropper:hover {
+                border: 2px dashed #00a8ff;
+                background-color: #252525;
+            }
+        """)
         
-        self.label = QLabel("📂 Videoyu buraya sürükle veya tıkla")
-        self.label.setStyleSheet(
-            "border: 2px dashed #888; border-radius: 5px; "
-            "padding: 20px; text-align: center; font-size: 14px; "
-            "background-color: #f5f5f5;"
-        )
-        self.label.setMinimumHeight(100)
-        layout.addWidget(self.label)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(40, 40, 40, 40)
+        layout.setSpacing(10)
+        
+        # Icon
+        self.icon_label = QLabel("🎬 📥")
+        self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.icon_label.setStyleSheet("font-size: 48px; color: #a0a0a0; background: transparent; border: none;")
+        layout.addWidget(self.icon_label)
+        
+        self.main_label = QLabel("Video Dosyasını Buraya Sürükle veya Tıkla")
+        self.main_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.main_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #ffffff; background: transparent; border: none;")
+        layout.addWidget(self.main_label)
+        
+        self.sub_label = QLabel("Sadece .mp4, .mov, .avi, .mkv")
+        self.sub_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.sub_label.setStyleSheet("font-size: 13px; color: #888888; background: transparent; border: none;")
+        layout.addWidget(self.sub_label)
         
         self.setLayout(layout)
     
@@ -35,30 +58,55 @@ class VideoDragDropWidget(QWidget):
         """Sürükleme ile giriş"""
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
-            self.label.setStyleSheet(
-                "border: 2px solid #4CAF50; border-radius: 5px; "
-                "padding: 20px; text-align: center; font-size: 14px; "
-                "background-color: #e8f5e9;"
-            )
+            self.setStyleSheet("""
+                #media_dropper {
+                    background-color: #252525;
+                    border: 2px solid #00a8ff;
+                    border-radius: 12px;
+                }
+            """)
     
     def dragLeaveEvent(self, event):
         """Sürükleme ile çıkış"""
-        self.label.setStyleSheet(
-            "border: 2px dashed #888; border-radius: 5px; "
-            "padding: 20px; text-align: center; font-size: 14px; "
-            "background-color: #f5f5f5;"
-        )
+        self.setStyleSheet("""
+            #media_dropper {
+                background-color: #1e1e1e;
+                border: 2px dashed #3a3a3a;
+                border-radius: 12px;
+            }
+            #media_dropper:hover {
+                border: 2px dashed #00a8ff;
+                background-color: #252525;
+            }
+        """)
     
     def dropEvent(self, event):
         """Dosya bırakıldığında"""
+        self.dragLeaveEvent(event)
         urls = event.mimeData().urls()
         if urls:
             file_path = urls[0].toLocalFile()
             if Path(file_path).suffix.lower() in ['.mp4', '.mov', '.avi', '.mkv']:
-                self.video_dropped.emit(file_path)
-                self.label.setText(f"✅ Video yüklendi: {Path(file_path).name}")
+                self.file_dropped.emit(file_path)
+                self.main_label.setText(f"✅ Yüklendi: {Path(file_path).name}")
+                self.main_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #00a8ff; background: transparent; border: none;")
             else:
-                self.label.setText("❌ Desteklenmeyen format")
+                self.main_label.setText("❌ Desteklenmeyen format")
+                self.main_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #ff5555; background: transparent; border: none;")
+
+    def mousePressEvent(self, event):
+        """Tıklama ile dosya seçimi"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Video Seç",
+                "",
+                "Video Dosyaları (*.mp4 *.mov *.avi *.mkv);;Tüm Dosyalar (*)"
+            )
+            if file_path:
+                self.file_dropped.emit(file_path)
+                self.main_label.setText(f"✅ Yüklendi: {Path(file_path).name}")
+                self.main_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #00a8ff; background: transparent; border: none;")
 
 
 class VideoTimelineWidget(QWidget):

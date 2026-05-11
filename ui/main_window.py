@@ -21,7 +21,7 @@ from video_processor import (
     VideoHandler, VideoTrimmer, AudioExtractor,
     NoiseReducer, AudioMixer, VideoExporter
 )
-from .widgets import VideoDragDropWidget, VideoTimelineWidget
+from .widgets import MediaFileDropper, VideoTimelineWidget
 
 logger = setup_logger(__name__)
 
@@ -321,14 +321,9 @@ class MainWindow(QMainWindow):
         load_layout = QVBoxLayout()
         load_layout.setSpacing(15)
         
-        self.drag_drop_widget = VideoDragDropWidget()
-        self.drag_drop_widget.video_dropped.connect(self.on_video_dropped)
+        self.drag_drop_widget = MediaFileDropper()
+        self.drag_drop_widget.file_dropped.connect(self.on_video_dropped)
         load_layout.addWidget(self.drag_drop_widget)
-        
-        # Alternatif: Dosya seçme butonu
-        load_btn = QPushButton("📂 Veya buradan video seç...")
-        load_btn.clicked.connect(self.load_video)
-        load_layout.addWidget(load_btn)
         
         load_group.setLayout(load_layout)
         layout.addWidget(load_group)
@@ -397,16 +392,11 @@ class MainWindow(QMainWindow):
         load_layout_audio.setSpacing(15)
         
         # Sürükle-bırak widget
-        self.drag_drop_audio = VideoDragDropWidget()
-        self.drag_drop_audio.video_dropped.connect(
+        self.drag_drop_audio = MediaFileDropper()
+        self.drag_drop_audio.file_dropped.connect(
             lambda path: self.load_video_audio(path)
         )
         load_layout_audio.addWidget(self.drag_drop_audio)
-        
-        # Dosya seçme butonu
-        load_btn_audio = QPushButton("📂 Veya buradan video seç...")
-        load_btn_audio.clicked.connect(self.load_video_audio)
-        load_layout_audio.addWidget(load_btn_audio)
         
         load_group_audio.setLayout(load_layout_audio)
         layout.addWidget(load_group_audio)
