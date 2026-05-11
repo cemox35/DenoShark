@@ -227,6 +227,26 @@ class ProcessingThread(QThread):
             logger.error(f"İşlem hatası: {e}")
             self.finished.emit(False)
 
+class DenoiseWorker(QThread):
+    finished = pyqtSignal(object)
+    
+    def __init__(self, audio_path, output_path, strength):
+        super().__init__()
+        self.audio_path = audio_path
+        self.output_path = output_path
+        self.strength = strength
+        
+    def run(self):
+        from video_processor.noise_reducer import NoiseReducer
+        reducer = NoiseReducer()
+        result = reducer.reduce_noise(
+            self.audio_path,
+            self.output_path,
+            reduction_strength=self.strength,
+            get_metrics=True
+        )
+        self.finished.emit(result)
+
 class MainWindow(QMainWindow):
     """Ana pencere"""
     
@@ -239,6 +259,12 @@ class MainWindow(QMainWindow):
     def init_ui(self):
         """Arayüzü oluştur"""
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
+        
+        # Pencere ikonu ayarla
+        icon_path = Path("img/logo-small.png")
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
+            
         self.setGeometry(100, 100, WINDOW_WIDTH, WINDOW_HEIGHT)
         self.setStyleSheet(PREMIUM_DARK_THEME)
         
@@ -457,10 +483,45 @@ class MainWindow(QMainWindow):
         self.denoise_metrics_label.setStyleSheet("color: #888;")
         denoise_layout.addWidget(self.denoise_metrics_label)
         
-        denoise_btn = QPushButton("🔇 Gürültüyü Temizle")
-        denoise_btn.setObjectName("primary_action")
-        denoise_btn.clicked.connect(self.reduce_noise)
-        denoise_layout.addWidget(denoise_btn)
+        # A/B Toggle Switch
+        self.ab_toggle_layout = QHBoxLayout()
+        self.btn_original = QPushButton("Orijinal")
+        self.btn_denoised = QPushButton("Temizlenmiş")
+        self.btn_original.setCheckable(True)
+        self.btn_denoised.setCheckable(True)
+        self.btn_original.setChecked(True)
+        self.btn_denoised.setEnabled(False) # Disabled until processed
+        
+        segmented_style = """
+            QPushButton {
+                background-color: #1e1e1e;
+                border: 1px solid #2a2a2a;
+                padding: 5px 10px;
+                color: #888;
+                border-radius: 4px;
+                font-weight: normal;
+            }
+            QPushButton:checked {
+                background-color: #00a8ff;
+                color: white;
+                border: 1px solid #00a8ff;
+                font-weight: bold;
+            }
+        """
+        self.btn_original.setStyleSheet(segmented_style)
+        self.btn_denoised.setStyleSheet(segmented_style)
+        
+        self.btn_original.clicked.connect(lambda: self.toggle_ab_mode(False))
+        self.btn_denoised.clicked.connect(lambda: self.toggle_ab_mode(True))
+        
+        self.ab_toggle_layout.addWidget(self.btn_original)
+        self.ab_toggle_layout.addWidget(self.btn_denoised)
+        denoise_layout.addLayout(self.ab_toggle_layout)
+        
+        self.btn_denoise = QPushButton("🔇 Gürültüyü Temizle")
+        self.btn_denoise.setObjectName("primary_action")
+        self.btn_denoise.clicked.connect(self.reduce_noise)
+        denoise_layout.addWidget(self.btn_denoise)
         
         denoise_group.setLayout(denoise_layout)
         right_tools_layout.addWidget(denoise_group)
@@ -781,44 +842,63 @@ class MainWindow(QMainWindow):
             return False
     
     def reduce_noise(self):
-        """Gürültü azalt"""
+        """Gürültü azalt (Arka planda)"""
         if not self._ensure_current_audio_path():
             self.statusBar().showMessage("Lütfen önce bir video seçin")
             return
         
-        audio_name = Path(self.current_audio_path).stem
-        default_path = str(Path.home() / "Desktop" / f"{audio_name}_denoised.wav")
+        default_path = str(TEMP_DIR / f"preview_denoised.wav")
         
-        output_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Temiz Sesi Kaydet",
+        self.statusBar().showMessage("Gürültü azaltılıyor... (biraz zaman alabilir)")
+        self.btn_denoise.setText("⏳ İşleniyor...")
+        self.btn_denoise.setEnabled(False)
+        self.btn_original.setEnabled(False)
+        self.btn_denoised.setEnabled(False)
+        
+        self.denoise_worker = DenoiseWorker(
+            self.current_audio_path,
             default_path,
-            "WAV Dosyası (*.wav)"
+            self.denoise_strength.value()
         )
+        self.denoise_worker.finished.connect(lambda res: self.on_denoise_finished(res, default_path))
+        self.denoise_worker.start()
+
+    def on_denoise_finished(self, result, output_path):
+        self.btn_denoise.setText("🔇 Gürültüyü Temizle")
+        self.btn_denoise.setEnabled(True)
         
-        if output_path:
-            self.statusBar().showMessage("Gürültü azaltılıyor... (biraz zaman alabilir)")
-            logger.info(f"Gürültü azaltma başlatılıyor...")
+        if isinstance(result, dict) and result.get("success"):
+            metrics = result.get("metrics") or {}
+            if metrics:
+                snr_db = metrics.get("snr_db")
+                quality = metrics.get("quality_score")
+                self.denoise_metrics_label.setText(f"SNR: {snr_db:.1f} dB | Kalite: {quality:.2f}/5")
+            self.statusBar().showMessage(f"✅ Gürültü azaltıldı! A/B modunu kullanarak karşılaştırabilirsiniz.")
             
-            reducer = NoiseReducer()
-            result = reducer.reduce_noise(
-                self.current_audio_path,
-                output_path,
-                reduction_strength=self.denoise_strength.value(),
-                get_metrics=True
-            )
-            
-            if isinstance(result, dict) and result.get("success"):
-                self.current_audio_path = output_path
-                metrics = result.get("metrics") or {}
-                if metrics:
-                    snr_db = metrics.get("snr_db")
-                    quality = metrics.get("quality_score")
-                    self.denoise_metrics_label.setText(f"SNR: {snr_db:.1f} dB | Kalite: {quality:.2f}/5")
-                self.statusBar().showMessage(f"✅ Gürültü azaltıldı: {Path(output_path).name}")
-            else:
-                error_msg = result.get("error") if isinstance(result, dict) else None
-                self.statusBar().showMessage("❌ Gürültü azaltılamadı" + (f": {error_msg}" if error_msg else ""))
+            # Enable A/B testing
+            self.btn_original.setEnabled(True)
+            self.btn_denoised.setEnabled(True)
+            self.btn_denoised.setChecked(True)
+            self.toggle_ab_mode(True, output_path)
+        else:
+            error_msg = result.get("error") if isinstance(result, dict) else None
+            self.statusBar().showMessage("❌ Gürültü azaltılamadı" + (f": {error_msg}" if error_msg else ""))
+            self.btn_original.setChecked(True)
+            self.toggle_ab_mode(False)
+
+    def toggle_ab_mode(self, use_denoised, alt_path=None):
+        if not hasattr(self, 'audio_timeline_widget'): return
+        
+        if use_denoised:
+            self.btn_denoised.setChecked(True)
+            self.btn_original.setChecked(False)
+            if alt_path:
+                self.audio_timeline_widget.enable_ab_mode(alt_path)
+            self.audio_timeline_widget.switch_audio(True)
+        else:
+            self.btn_original.setChecked(True)
+            self.btn_denoised.setChecked(False)
+            self.audio_timeline_widget.switch_audio(False)
 
     def auto_set_denoise_strength(self):
         """Gürültü azaltma gücünü otomatik ayarla"""

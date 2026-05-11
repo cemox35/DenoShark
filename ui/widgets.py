@@ -213,6 +213,7 @@ class AdvancedVideoTrimmer(QWidget):
         self.video_path = None
         self.duration = 0.0
         self._updating_inputs = False
+        self.ab_mode_active = False
         self.init_ui()
         
     def init_ui(self):
@@ -243,6 +244,12 @@ class AdvancedVideoTrimmer(QWidget):
         self.audio_output = QAudioOutput()
         self.media_player.setAudioOutput(self.audio_output)
         self.media_player.setVideoOutput(self.video_widget)
+        
+        # Alt Media Player (A/B Testing)
+        self.alt_media_player = QMediaPlayer()
+        self.alt_audio_output = QAudioOutput()
+        self.alt_media_player.setAudioOutput(self.alt_audio_output)
+        self.alt_audio_output.setMuted(True)
         
         self.media_player.positionChanged.connect(self.position_changed)
         self.media_player.durationChanged.connect(self.duration_changed)
@@ -321,6 +328,9 @@ class AdvancedVideoTrimmer(QWidget):
     def load_video(self, path: str):
         self.video_path = path
         self.media_player.setSource(QUrl.fromLocalFile(path))
+        self.alt_media_player.setSource(QUrl())
+        self.ab_mode_active = False
+        self.audio_output.setMuted(False)
         
         self.placeholder_label.hide()
         self.video_widget.show()
@@ -334,13 +344,19 @@ class AdvancedVideoTrimmer(QWidget):
     def toggle_playback(self):
         if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self.media_player.pause()
+            self.alt_media_player.pause()
             self.play_btn.setText("▶")
         else:
             # Restart if at end of trim range
             end_ms = int(self.end_spin.value() * 1000)
             if self.media_player.position() >= end_ms - 100 and end_ms > 0:
-                self.media_player.setPosition(int(self.start_spin.value() * 1000))
+                pos = int(self.start_spin.value() * 1000)
+                self.media_player.setPosition(pos)
+                self.alt_media_player.setPosition(pos)
             self.media_player.play()
+            if self.alt_media_player.source().isValid():
+                self.alt_media_player.setPosition(self.media_player.position())
+                self.alt_media_player.play()
             self.play_btn.setText("⏸")
             
     def toggle_mute(self):
@@ -353,6 +369,7 @@ class AdvancedVideoTrimmer(QWidget):
             
     def set_volume(self, value):
         self.audio_output.setVolume(value / 100.0)
+        self.alt_audio_output.setVolume(value / 100.0)
         if value == 0:
             self.vol_btn.setText("🔇")
         else:
@@ -373,8 +390,11 @@ class AdvancedVideoTrimmer(QWidget):
         if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             if position >= end_ms and end_ms > 0:
                 self.media_player.pause()
+                self.alt_media_player.pause()
                 self.play_btn.setText("▶")
-                self.media_player.setPosition(int(self.start_spin.value() * 1000))
+                pos = int(self.start_spin.value() * 1000)
+                self.media_player.setPosition(pos)
+                self.alt_media_player.setPosition(pos)
         
     def duration_changed(self, duration):
         if duration > 0:
@@ -402,9 +422,13 @@ class AdvancedVideoTrimmer(QWidget):
         
         # Seek to the handle being dragged to show live preview
         if active_handle == 'max':
-            self.media_player.setPosition(int(end_sec * 1000))
+            pos = int(end_sec * 1000)
+            self.media_player.setPosition(pos)
+            self.alt_media_player.setPosition(pos)
         else:
-            self.media_player.setPosition(int(start_sec * 1000))
+            pos = int(start_sec * 1000)
+            self.media_player.setPosition(pos)
+            self.alt_media_player.setPosition(pos)
             
         self._updating_inputs = False
         self.trim_points_changed.emit(start_sec, end_sec)
@@ -426,7 +450,9 @@ class AdvancedVideoTrimmer(QWidget):
         self.range_slider.setValues(min_val, max_val)
         
         # Seek to start
-        self.media_player.setPosition(int(start_sec * 1000))
+        pos = int(start_sec * 1000)
+        self.media_player.setPosition(pos)
+        self.alt_media_player.setPosition(pos)
         
         self._updating_inputs = False
         self.trim_points_changed.emit(start_sec, end_sec)
@@ -436,6 +462,23 @@ class AdvancedVideoTrimmer(QWidget):
         
     def close(self):
         self.media_player.stop()
+        self.alt_media_player.stop()
+        
+    def enable_ab_mode(self, alt_audio_path: str):
+        self.alt_media_player.setSource(QUrl.fromLocalFile(alt_audio_path))
+        self.alt_media_player.setPosition(self.media_player.position())
+        if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self.alt_media_player.play()
+            
+    def switch_audio(self, use_alt: bool):
+        self.ab_mode_active = use_alt
+        if use_alt:
+            self.audio_output.setMuted(True)
+            self.alt_audio_output.setMuted(False)
+            self.alt_media_player.setPosition(self.media_player.position())
+        else:
+            self.audio_output.setMuted(False)
+            self.alt_audio_output.setMuted(True)
 
 class MediaPoolWidget(QFrame):
     """Proje Medya Kütüphanesi (Media Pool)"""
