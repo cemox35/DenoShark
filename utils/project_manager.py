@@ -2,6 +2,7 @@ import json
 import os
 from pathlib import Path
 from PyQt6.QtWidgets import QMessageBox
+from PyQt6.QtCore import QTimer
 
 class ProjectManager:
     """Handles serialization and loading of DenoShark (.deno) projects."""
@@ -100,6 +101,9 @@ class ProjectManager:
                     self._add_to_timeline(clip_data)
                 else:
                     print(f"Warning: Timeline media not found: {filepath}")
+
+            # Sync main video clip with preview players
+            self._sync_preview_from_timeline()
             
             # Emit changes for audio engine updates
             self.main_window.multi_track_timeline.timeline_changed.emit(
@@ -112,6 +116,43 @@ class ProjectManager:
         except Exception as e:
             print(f"Error loading project: {e}")
             return False
+
+    def _sync_preview_from_timeline(self):
+        """Load primary video clip into preview players and show first frame."""
+        timeline = self.main_window.multi_track_timeline
+        primary_clip = timeline.main_video_clip
+
+        if not primary_clip:
+            video_clips = [c for c in timeline.clips if c.clip_type == 'video']
+            if video_clips:
+                primary_clip = sorted(video_clips, key=lambda c: (c.track_idx, c.start_time))[0]
+
+        if not primary_clip:
+            return
+
+        video_path = primary_clip.file_path
+        if not video_path or not os.path.exists(video_path):
+            return
+
+        self.main_window.current_video_path = video_path
+        if hasattr(self.main_window, 'timeline_widget'):
+            self.main_window.timeline_widget.load_video(video_path)
+
+        if hasattr(self.main_window, 'audio_timeline_widget'):
+            self.main_window.audio_video_path = video_path
+            self.main_window.audio_timeline_widget.load_video(video_path)
+
+        # Force first frame render
+        if hasattr(self.main_window, 'timeline_widget'):
+            player = self.main_window.timeline_widget.media_player
+            QTimer.singleShot(200, lambda: self._force_preview_frame(player))
+
+    def _force_preview_frame(self, player):
+        try:
+            player.setPosition(0)
+            player.pause()
+        except Exception:
+            pass
 
     def auto_save(self, temp_dir: str):
         """Performs a silent background save to a temporary file."""
