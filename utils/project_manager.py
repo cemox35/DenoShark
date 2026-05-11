@@ -170,6 +170,16 @@ class ProjectManager:
             settings["extract_audio"] = self.main_window.extract_audio_checkbox.isChecked()
         if hasattr(self.main_window, 'extract_video_checkbox'):
             settings["extract_video"] = self.main_window.extract_video_checkbox.isChecked()
+        if hasattr(self.main_window, 'whisper_model_combo'):
+            settings["whisper_model"] = self.main_window.whisper_model_combo.currentText()
+        if hasattr(self.main_window, 'whisper_lang_combo'):
+            settings["whisper_language"] = self.main_window.whisper_lang_combo.currentText()
+        if hasattr(self.main_window, 'export_format_combo'):
+            settings["export_format"] = self.main_window.export_format_combo.currentText()
+        if hasattr(self.main_window, 'export_res_combo'):
+            settings["export_resolution"] = self.main_window.export_res_combo.currentText()
+        if hasattr(self.main_window, 'export_quality_combo'):
+            settings["export_quality"] = self.main_window.export_quality_combo.currentText()
         return settings
 
     def _apply_settings(self, settings):
@@ -181,6 +191,16 @@ class ProjectManager:
             self.main_window.extract_audio_checkbox.setChecked(settings["extract_audio"])
         if hasattr(self.main_window, 'extract_video_checkbox') and "extract_video" in settings:
             self.main_window.extract_video_checkbox.setChecked(settings["extract_video"])
+        if hasattr(self.main_window, 'whisper_model_combo') and "whisper_model" in settings:
+            self.main_window.whisper_model_combo.setCurrentText(settings["whisper_model"])
+        if hasattr(self.main_window, 'whisper_lang_combo') and "whisper_language" in settings:
+            self.main_window.whisper_lang_combo.setCurrentText(settings["whisper_language"])
+        if hasattr(self.main_window, 'export_format_combo') and "export_format" in settings:
+            self.main_window.export_format_combo.setCurrentText(settings["export_format"])
+        if hasattr(self.main_window, 'export_res_combo') and "export_resolution" in settings:
+            self.main_window.export_res_combo.setCurrentText(settings["export_resolution"])
+        if hasattr(self.main_window, 'export_quality_combo') and "export_quality" in settings:
+            self.main_window.export_quality_combo.setCurrentText(settings["export_quality"])
 
     def _get_media_pool(self):
         media_pool_widget = self.main_window.media_pool

@@ -6,7 +6,10 @@ import os
 import json
 from pathlib import Path
 from datetime import timedelta
-from faster_whisper import WhisperModel
+try:
+    from faster_whisper import WhisperModel
+except Exception:
+    WhisperModel = None
 from utils.logger import setup_logger
 from utils.config import WHISPER_LANGUAGE
 
@@ -31,19 +34,51 @@ class SpeechRecognizer:
             model_name: Model boyutu (tiny, base, small, medium)
             device: "cuda" veya "cpu"
         """
+        if WhisperModel is None:
+            msg = (
+                "faster-whisper is not installed. Please install it in your virtualenv:\n"
+                "pip install faster-whisper ctranslate2 && pip install -U sentencepiece"
+            )
+            logger.error(msg)
+            raise ModuleNotFoundError(msg)
+
+        # Allow automatic device selection: prefer CUDA when available, otherwise CPU.
+        if device == "auto":
+            try:
+                import torch
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+            except Exception:
+                device = "cpu"
+
+        # Try to initialize on requested device; on failure (DLL/driver issues) fall back to CPU.
         try:
             logger.info(f"faster-whisper model yükleniyor: {model_name} ({device})")
             self.model = WhisperModel(model_name, device=device, compute_type="float32")
             self.model_name = model_name
             self.device = device
-            logger.info(f"Model başarıyla yüklendi: {model_name}")
+            logger.info(f"Model başarıyla yüklendi: {model_name} on {device}")
         except Exception as e:
-            logger.error(f"Model yükleme hatası: {e}")
-            # CPU'ya düş
+            logger.error(f"Model yükleme hatası ({device}): {e}")
+            # If CUDA init failed, try CPU before giving up.
             if device == "cuda":
-                logger.warning("CUDA kullanalamıyor, CPU'ya geçiliyor...")
-                self.model = WhisperModel(model_name, device="cpu", compute_type="float32")
-                self.device = "cpu"
+                try:
+                    logger.warning("CUDA başlatılamadı — CPU moduna düşülüyor.")
+                    self.model = WhisperModel(model_name, device="cpu", compute_type="float32")
+                    self.model_name = model_name
+                    self.device = "cpu"
+                    logger.info(f"Model başarıyla yüklendi: {model_name} on cpu")
+                except Exception as e2:
+                    logger.error(f"CPU'ya geçişte model yükleme hatası: {e2}")
+                    # Provide actionable guidance for DLL/driver issues
+                    guidance = (
+                        "DLL load failed (c10.dll or similar). Common fixes:\n"
+                        " - Reinstall matching PyTorch (CPU-only) or correct CUDA-enabled wheel.\n"
+                        " - Update GPU drivers and CUDA toolkit to match your PyTorch build.\n"
+                        " - Install Microsoft Visual C++ Redistributable (2015-2022).\n"
+                        "If you want a quick workaround, initialize SpeechRecognizer with device='cpu'."
+                    )
+                    logger.error(guidance)
+                    raise
             else:
                 raise
     

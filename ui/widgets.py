@@ -1081,6 +1081,9 @@ class AudioTimelineWidget(QGraphicsView):
         self.clips = []
         self.main_video_clip = None
         self.main_audio_clip = None
+        # Path to the current main video (used by other UI logic)
+        self.main_video_path = None
+        self.main_video_duration = None
         
         self.track_height = 50
         self.num_tracks = 5
@@ -1236,6 +1239,10 @@ class AudioTimelineWidget(QGraphicsView):
             if self.main_audio_clip in self.clips:
                 self.clips.remove(self.main_audio_clip)
             
+        # Record main video path/duration for external callers
+        self.main_video_path = file_path
+        self.main_video_duration = duration_sec
+
         self.main_video_clip = AudioClipItem(file_path, 0, duration_sec, self.pixels_per_second, 0, clip_type='video', is_main=True)
         self.scene.addItem(self.main_video_clip)
         self.clips.append(self.main_video_clip)
