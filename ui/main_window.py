@@ -293,6 +293,76 @@ class WhisperWorker(QThread):
             self.status_changed.emit(f"❌ Hata: {str(e)}")
             self.finished.emit(False, "")
 
+class ExportWorker(QThread):
+    """Video export ve altyazı gömme işlemleri thread'i"""
+    progress = pyqtSignal(int)
+    finished = pyqtSignal(bool, str)
+    
+    def __init__(self, input_video: str, output_video: str, quality: str, subtitle_file: str = None):
+        super().__init__()
+        self.input_video = input_video
+        self.output_video = output_video
+        self.quality = quality
+        self.subtitle_file = subtitle_file
+
+    def run(self):
+        try:
+            self.progress.emit(30)
+            
+            if self.subtitle_file:
+                # Altyazı gömülecekse ffmpeg (imageio_ffmpeg) kullanarak hardcode ederiz.
+                import os
+                # Ffmpeg'in Windows'ta ':' (colon) karakterinden dolayı hata vermesini önlemek için 
+                # yolu relative path'e çevirip ters slash'ları düz slash yapıyoruz.
+                try:
+                    sub_path = os.path.relpath(self.subtitle_file).replace('\\', '/')
+                except ValueError:
+                    # Farklı disk sürücüsü durumu için fallback
+                    sub_path = Path(self.subtitle_file).resolve().as_posix()
+                    sub_path = sub_path.replace(":", "\\\\:")
+                
+                import subprocess
+                import imageio_ffmpeg
+                # quality string'ine göre bitrate/fps seçilebilir, şimdilik sabit
+                ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+                
+                cmd = [
+                    ffmpeg_exe, "-y", 
+                    "-i", self.input_video,
+                    "-vf", f"subtitles={sub_path}",
+                    "-c:v", "libx264",
+                    "-preset", "fast",
+                    "-c:a", "aac",
+                    self.output_video
+                ]
+                logger.info(f"Video (altyazılı) export ediliyor: {' '.join(cmd)}")
+                self.progress.emit(50)
+                
+                # subprocess ile çalıştır
+                process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                stdout, stderr = process.communicate()
+                
+                if process.returncode == 0:
+                    self.progress.emit(100)
+                    self.finished.emit(True, self.output_video)
+                else:
+                    logger.error(f"FFmpeg Hatası:\n{stderr}")
+                    self.finished.emit(False, str(stderr[-500:])) # Sadece son hataları göster
+            else:
+                # Altyazı gömme yoksa normal VideoExporter'ı kullanıyoruz
+                from video_processor.exporter import VideoExporter
+                self.progress.emit(50)
+                success = VideoExporter.export(self.input_video, self.output_video, self.quality)
+                if success:
+                    self.progress.emit(100)
+                    self.finished.emit(True, self.output_video)
+                else:
+                    self.finished.emit(False, "VideoExporter işleminde Hata Oluştu!")
+                    
+        except Exception as e:
+            logger.error(f"ExportWorker Hatası: {e}")
+            self.finished.emit(False, str(e))
+
 class MainWindow(QMainWindow):
     """Ana pencere"""
     
@@ -1157,8 +1227,33 @@ class MainWindow(QMainWindow):
         quality_layout.addWidget(self.export_quality_combo)
         export_layout.addLayout(quality_layout)
         
+        # Altyazı Ekleme
+        subtitle_layout = QHBoxLayout()
+        self.export_add_subtitle_cmd = QCheckBox("Videoya Altyazı Göm (SRT Dosyası Seç)")
+        self.export_add_subtitle_cmd.setStyleSheet("padding: 5px;")
+        
+        self.export_subtitle_path = QLabel("Seçilen Dosya: Yok")
+        self.export_subtitle_path.setStyleSheet("color: #aaaaaa; font-style: italic;")
+        
+        btn_select_srt = QPushButton("SRT Seç")
+        btn_select_srt.clicked.connect(self.select_subtitle_for_export)
+        btn_select_srt.setFixedWidth(100)
+        
+        subtitle_layout.addWidget(self.export_add_subtitle_cmd)
+        subtitle_layout.addWidget(btn_select_srt)
+        subtitle_layout.addWidget(self.export_subtitle_path)
+        subtitle_layout.addStretch()
+        
+        export_layout.addLayout(subtitle_layout)
+        
         export_group.setLayout(export_layout)
         layout.addWidget(export_group)
+        
+        # İlerleme çubuğu
+        self.export_progress = QProgressBar()
+        self.export_progress.setValue(0)
+        self.export_progress.hide()
+        layout.addWidget(self.export_progress)
         
         # Buton kısmı
         action_layout = QHBoxLayout()
@@ -1178,19 +1273,58 @@ class MainWindow(QMainWindow):
         widget.setLayout(layout)
         return widget
         
+    def select_subtitle_for_export(self):
+        file_path, _ = QFileDialog.getOpenFileName(self, "SRT Seç", self.project_manager.last_used_directory, "Subtitle Files (*.srt)")
+        if file_path:
+            self.export_subtitle_path_value = file_path
+            self.export_subtitle_path.setText(f"Seçilen: {Path(file_path).name}")
+            self.export_add_subtitle_cmd.setChecked(True)
+    
     def process_export_action(self):
         """Kullanıcı videoyu indir butonuna tıkladığında çalışacak alan"""
+        if not hasattr(self, 'current_video_path') or not self.current_video_path:
+            QMessageBox.warning(self, "Hata", "Lütfen önce dışa aktarılacak bir video veya proje yükleyin!")
+            return
+            
         file_path, _ = QFileDialog.getSaveFileName(self, "Videoyu İndir", self.project_manager.last_used_directory, f"Video Files (*{self.export_format_combo.currentText()})")
         
         if file_path:
-            # Burada Exporter işlemlerini çağırmak vs gerekli.
-            # Şimdilik kullanıcıya UI mesajıyla indirme süreci simülasyonu gösterelim.
-            QMessageBox.information(
-                self, 
-                "İndirme Başlatılıyor", 
-                f"Video seçtiğiniz ayarlar ile kaydediliyor...\n\nFormat: {self.export_format_combo.currentText()}\nÇözünürlük: {self.export_res_combo.currentText()}\nKalite: {self.export_quality_combo.currentText()}\n\nDosya: {file_path}"
-            )
+            # Butonu devre dışı bırak
+            self.btn_action_export.setEnabled(False)
+            self.btn_action_export.setText("Yükleniyor...")
+            
+            # Parametreleri hazırla
+            input_video = self.current_video_path
+            quality_text = self.export_quality_combo.currentText()
+            quality_map = {"Yüksek Kalite (Yavaş)": "fhd", "Orta (Dengeli)": "hd", "Düşük (Hızlı Çıktı)": "standard"}
+            quality = quality_map.get(quality_text, "hd")
+            
+            subtitle_file = getattr(self, 'export_subtitle_path_value', None) if self.export_add_subtitle_cmd.isChecked() else None
+            
+            self.statusBar().showMessage(f"Dışa aktarma başlatıldı: {file_path}")
+            self.export_progress.show()
+            self.export_progress.setValue(10)
+            
+            # Thread başlat
+            self.export_thread = ExportWorker(input_video, file_path, quality, subtitle_file)
+            self.export_thread.progress.connect(self.export_progress.setValue)
+            self.export_thread.finished.connect(self.on_export_finished)
+            self.export_thread.start()
+
+    def on_export_finished(self, success, message):
+        self.btn_action_export.setEnabled(True)
+        self.btn_action_export.setText("🚀 VİDEOYU İNDİR")
+        self.export_progress.setValue(100)
+        
+        if success:
+            QMessageBox.information(self, "Başarılı", f"Video başarıyla kaydedildi:\n\n{message}")
             self.statusBar().showMessage("Video başarıyla dışa aktarıldı.", 4000)
+        else:
+            QMessageBox.critical(self, "Hata", f"Dışa aktarma işlemi başarısız oldu!\n\nDetay: {message}")
+            self.statusBar().showMessage("Video dışa aktarılamadı.", 4000)
+        
+        # ProgressBar'ı biraz bekletip gizle
+        QTimer.singleShot(2000, self.export_progress.hide)
     
     def on_media_selected(self, file_path: str):
         """Media Pool'dan dosya seçildiğinde aktif sekmeye yükle"""

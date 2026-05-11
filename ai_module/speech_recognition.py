@@ -102,11 +102,59 @@ class SpeechRecognizer:
             
             segments, info = self.model.transcribe(
                 audio_path,
-                language=language
+                language=language,
+                word_timestamps=True
             )
             
             # Segments'i list'e dönüştür (lazy generator olduğundan)
-            segments_list = list(segments)
+            # Uzun cümleleri küçük parçalara (ör. max 3 saniye veya max 5-6 kelime) bölelim
+            segments_list = []
+            MAX_DURATION = 2.5
+            MAX_WORDS = 6
+            
+            for segment in segments:
+                if not getattr(segment, "words", None):
+                    # Fallback (word_timestamps desteklenmiyorsa)
+                    segments_list.append(segment)
+                    continue
+                
+                current_words = []
+                current_start = -1
+                
+                for word_info in segment.words:
+                    if current_start == -1:
+                        current_start = word_info.start
+                    
+                    current_words.append(word_info)
+                    duration = word_info.end - current_start
+                    
+                    if duration >= MAX_DURATION or len(current_words) >= MAX_WORDS:
+                        # Pydantic/Tuple benzeri bir yapı yerine basit dict veya özel sınıf dönebiliriz.
+                        # Mevcut kod segment.start, segment.end, segment.text kullanıyor.
+                        class SplitSegment:
+                            pass
+                        
+                        s = SplitSegment()
+                        s.start = current_start
+                        s.end = word_info.end
+                        s.text = "".join(w.word for w in current_words).strip()
+                        
+                        segments_list.append(s)
+                        
+                        current_words = []
+                        current_start = -1
+                
+                # Kalan kelimeleri ekle
+                if current_words:
+                    class SplitSegment:
+                        pass
+                    
+                    s = SplitSegment()
+                    s.start = current_start
+                    s.end = current_words[-1].end
+                    s.text = "".join(w.word for w in current_words).strip()
+                    
+                    segments_list.append(s)
             
             logger.info(f"Transkripsiyon tamamlandı. Detected language: {info.language}")
             
