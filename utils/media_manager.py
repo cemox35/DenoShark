@@ -21,17 +21,36 @@ class MediaManager:
             return self.media_items[file_path]
             
         try:
-            # Video özellikleri ve Thumbnail çıkarma
+            # Ses dosyası ise mutagen ile süre al
+            ext = Path(file_path).suffix.lower()
+            if ext in ['.mp3', '.wav', '.aac', '.ogg', '.m4a']:
+                try:
+                    from mutagen import File
+                    audio = File(file_path)
+                    duration = audio.info.length if audio else 10.0
+                except Exception as e:
+                    logger.error(f"Mutagen okuma hatası: {e}")
+                    duration = 10.0
+                    
+                info = {
+                    'path': file_path,
+                    'name': Path(file_path).name,
+                    'duration': duration,
+                    'thumbnail': None,
+                    'type': 'audio'
+                }
+                self.media_items[file_path] = info
+                return info
+                
+            # Video zellikleri ve Thumbnail karma
             cap = cv2.VideoCapture(file_path)
             if not cap.isOpened():
-                # Ses dosyası ise veya okunamadıysa
-                # FFmpeg kullanarak süre de alabiliriz, şimdilik basit tutalım
                 info = {
                     'path': file_path,
                     'name': Path(file_path).name,
                     'duration': 0.0,
                     'thumbnail': None,
-                    'type': 'audio' if Path(file_path).suffix.lower() in ['.mp3', '.wav', '.aac'] else 'unknown'
+                    'type': 'unknown'
                 }
                 self.media_items[file_path] = info
                 return info

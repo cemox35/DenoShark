@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QGraphicsScene, QGraphicsRectItem, QGraphicsLineItem, QGraphicsTextItem,
     QGraphicsPolygonItem, QMenu
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QMimeData, QRect, QPoint, QPointF, QSize, QUrl, QRectF
+from PyQt6.QtCore import Qt, pyqtSignal, QMimeData, QRect, QPoint, QPointF, QSize, QUrl, QRectF, QObject, QTimer
 from PyQt6.QtGui import QPixmap, QImage, QDrag, QPainter, QColor, QBrush, QPen, QPalette, QIcon, QFont, QLinearGradient, QPolygonF, QUndoStack, QUndoCommand, QAction
 from utils.media_manager import MediaManager
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
@@ -329,19 +329,45 @@ class AdvancedVideoTrimmer(QWidget):
         
     def load_video(self, path: str):
         self.video_path = path
-        self.media_player.setSource(QUrl.fromLocalFile(path))
+        
+        ext = Path(path).suffix.lower()
+        is_audio = ext in ['.mp3', '.wav', '.aac', '.ogg', '.m4a']
+        
+        # Eski player'ı tamamen yıkıp yeniden oluştur.
+        # Bu, pause()+setSource() kombinasyonunun Qt/FFmpeg backend'de
+        # oluşturduğu deadlock'ı tamamen önler.
+        self.media_player.positionChanged.disconnect()
+        self.media_player.durationChanged.disconnect()
+        self.media_player.setSource(QUrl())
+        self.media_player.deleteLater()
+        self.audio_output.deleteLater()
+
+        self.media_player = QMediaPlayer()
+        self.audio_output = QAudioOutput()
+        self.media_player.setAudioOutput(self.audio_output)
+        self.media_player.positionChanged.connect(self.position_changed)
+        self.media_player.durationChanged.connect(self.duration_changed)
+
         self.alt_media_player.setSource(QUrl())
+        
+        if is_audio:
+            self.media_player.setVideoOutput(None)
+            self.placeholder_label.setText("🎵\nSes Dosyası")
+            self.placeholder_label.show()
+            self.video_widget.hide()
+        else:
+            self.media_player.setVideoOutput(self.video_widget)
+            self.placeholder_label.setText("🎬\nVideo Önizleme")
+            self.placeholder_label.hide()
+            self.video_widget.show()
+
         self.ab_mode_active = False
         self.audio_output.setMuted(False)
-        
-        self.placeholder_label.hide()
-        self.video_widget.show()
-        
         self.play_btn.setEnabled(True)
         self.range_slider.setEnabled(True)
-        
-        self.media_player.pause()
         self.play_btn.setText("▶")
+
+        self.media_player.setSource(QUrl.fromLocalFile(path))
         
     def toggle_playback(self):
         if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
@@ -637,6 +663,7 @@ class MoveClipCommand(QUndoCommand):
     def __init__(self, clip, old_start, old_track, new_start, new_track):
         super().__init__("Klibi Taşı")
         self.clip = clip
+        self.timeline = clip.scene().views()[0] if clip.scene() and clip.scene().views() else None
         self.old_start = old_start
         self.old_track = old_track
         self.new_start = new_start
@@ -644,24 +671,31 @@ class MoveClipCommand(QUndoCommand):
 
     def undo(self):
         self.clip.set_position_and_track(self.old_start, self.old_track)
+        if self.timeline: self.timeline.get_mix_data()
 
     def redo(self):
         self.clip.set_position_and_track(self.new_start, self.new_track)
+        if self.timeline: self.timeline.get_mix_data()
 
 class TrimClipCommand(QUndoCommand):
-    def __init__(self, clip, old_start, old_dur, new_start, new_dur):
+    def __init__(self, clip, old_start, old_dur, old_media_start, new_start, new_dur, new_media_start):
         super().__init__("Klibi Kırp")
         self.clip = clip
+        self.timeline = clip.scene().views()[0] if clip.scene() and clip.scene().views() else None
         self.old_start = old_start
         self.old_dur = old_dur
+        self.old_media_start = old_media_start
         self.new_start = new_start
         self.new_dur = new_dur
+        self.new_media_start = new_media_start
 
     def undo(self):
-        self.clip.set_geometry(self.old_start, self.old_dur)
+        self.clip.set_geometry(self.old_start, self.old_dur, self.old_media_start)
+        if self.timeline: self.timeline.get_mix_data()
 
     def redo(self):
-        self.clip.set_geometry(self.new_start, self.new_dur)
+        self.clip.set_geometry(self.new_start, self.new_dur, self.new_media_start)
+        if self.timeline: self.timeline.get_mix_data()
 
 class AddClipCommand(QUndoCommand):
     def __init__(self, timeline, clip):
@@ -674,6 +708,7 @@ class AddClipCommand(QUndoCommand):
             self.timeline.scene.removeItem(self.clip)
         if self.clip in self.timeline.clips:
             self.timeline.clips.remove(self.clip)
+        self.timeline.get_mix_data()
 
     def redo(self):
         if self.clip.scene() != self.timeline.scene:
@@ -681,6 +716,7 @@ class AddClipCommand(QUndoCommand):
         if self.clip not in self.timeline.clips:
             self.timeline.clips.append(self.clip)
         self.timeline.update_bounds_for_clip(self.clip)
+        self.timeline.get_mix_data()
 
 class DeleteClipCommand(QUndoCommand):
     def __init__(self, timeline, clips):
@@ -694,6 +730,7 @@ class DeleteClipCommand(QUndoCommand):
                 self.timeline.scene.addItem(clip)
             if clip not in self.timeline.clips:
                 self.timeline.clips.append(clip)
+        self.timeline.get_mix_data()
 
     def redo(self):
         for clip in self.clips:
@@ -701,6 +738,7 @@ class DeleteClipCommand(QUndoCommand):
                 self.timeline.scene.removeItem(clip)
             if clip in self.timeline.clips:
                 self.timeline.clips.remove(clip)
+        self.timeline.get_mix_data()
 
 class SplitClipCommand(QUndoCommand):
     def __init__(self, timeline, clip, split_time):
@@ -721,6 +759,7 @@ class SplitClipCommand(QUndoCommand):
         if self.second_clip in self.timeline.clips:
             self.timeline.clips.remove(self.second_clip)
         self.clip.set_geometry(self.clip.start_time, self.orig_dur)
+        self.timeline.get_mix_data()
 
     def redo(self):
         self.clip.set_geometry(self.clip.start_time, self.first_dur)
@@ -728,15 +767,17 @@ class SplitClipCommand(QUndoCommand):
             self.timeline.scene.addItem(self.second_clip)
         if self.second_clip not in self.timeline.clips:
             self.timeline.clips.append(self.second_clip)
+        self.timeline.get_mix_data()
 
 
 class AudioClipItem(QGraphicsRectItem):
     """Sürüklenebilir Medya Klibi - DaVinci Resolve Style"""
-    def __init__(self, file_path, start_time, duration, pixels_per_second, track_idx, clip_type='audio', is_main=False):
+    def __init__(self, file_path, start_time, duration, pixels_per_second, track_idx, clip_type='audio', is_main=False, media_start=0.0):
         super().__init__()
         self.file_path = file_path
         self.start_time = start_time
         self.duration = duration
+        self.media_start = media_start
         self.pps = pixels_per_second
         self.track_idx = track_idx
         self.track_height = 50
@@ -751,6 +792,7 @@ class AudioClipItem(QGraphicsRectItem):
         self._temp_start = self.start_time
         self._temp_dur = self.duration
         self._temp_track = self.track_idx
+        self._temp_media_start = self.media_start
         
         self.setRect(0, 0, max(1, self.duration * self.pps), self.track_height - 10)
         self.setPos(self.start_time * self.pps, self.track_idx * self.track_height + 5)
@@ -777,9 +819,11 @@ class AudioClipItem(QGraphicsRectItem):
             if hasattr(view, 'update_bounds_for_clip'):
                 view.update_bounds_for_clip(self)
         
-    def set_geometry(self, start_time, duration):
+    def set_geometry(self, start_time, duration, media_start=None):
         self.start_time = start_time
         self.duration = duration
+        if media_start is not None:
+            self.media_start = media_start
         self.setRect(0, 0, max(1, self.duration * self.pps), self.track_height - 10)
         self.setPos(self.start_time * self.pps, self.y())
         self._update_label_and_tooltip()
@@ -789,7 +833,7 @@ class AudioClipItem(QGraphicsRectItem):
                 view.update_bounds_for_clip(self)
 
     def _update_label_and_tooltip(self):
-        self.setToolTip(f"{Path(self.file_path).name}\nStart: {self.start_time:.2f}s\nDuration: {self.duration:.2f}s")
+        self.setToolTip(f"{Path(self.file_path).name}\nStart: {self.start_time:.2f}s\nDuration: {self.duration:.2f}s\nMedia Offset: {self.media_start:.2f}s")
         # Ensure label fits inside clip
         rect_width = self.rect().width()
         text = Path(self.file_path).name
@@ -830,6 +874,7 @@ class AudioClipItem(QGraphicsRectItem):
                 self.is_resizing = True
                 self._temp_start = self.start_time
                 self._temp_dur = self.duration
+                self._temp_media_start = self.media_start
                 self._orig_click_x = event.scenePos().x()
                 event.accept()
                 return
@@ -845,7 +890,8 @@ class AudioClipItem(QGraphicsRectItem):
             if self.resize_mode == 'left':
                 new_start = min(self._temp_start + self._temp_dur - 0.1, max(0, self._temp_start + dx))
                 new_dur = self._temp_dur - (new_start - self._temp_start)
-                self.set_geometry(new_start, new_dur)
+                new_media_start = max(0.0, self._temp_media_start + (new_start - self._temp_start))
+                self.set_geometry(new_start, new_dur, new_media_start)
             elif self.resize_mode == 'right':
                 new_dur = max(0.1, self._temp_dur + dx)
                 self.set_geometry(self._temp_start, new_dur)
@@ -857,8 +903,8 @@ class AudioClipItem(QGraphicsRectItem):
             self.is_resizing = False
             view = self.scene().views()[0] if self.scene() and self.scene().views() else None
             if view and (abs(self.start_time - self._temp_start) > 0.01 or abs(self.duration - self._temp_dur) > 0.01):
-                cmd = TrimClipCommand(self, self._temp_start, self._temp_dur, self.start_time, self.duration)
-                self.set_geometry(self._temp_start, self._temp_dur) # revert to let redo handle it
+                cmd = TrimClipCommand(self, self._temp_start, self._temp_dur, self._temp_media_start, self.start_time, self.duration, self.media_start)
+                self.set_geometry(self._temp_start, self._temp_dur, self._temp_media_start) # revert to let redo handle it
                 view.undo_stack.push(cmd)
             event.accept()
             return
@@ -927,10 +973,92 @@ class AudioClipItem(QGraphicsRectItem):
         return super().itemChange(change, value)
 
 
+class RealTimeAudioEngine(QObject):
+    def __init__(self):
+        super().__init__()
+        self.players = []
+        self.master_playing = False
+        
+    def sync_clips(self, mix_data):
+        new_players = []
+        
+        for c in mix_data:
+            # Try to find an existing player for this path
+            reused_player = None
+            for p in self.players:
+                if p.get('path') == c['path']:
+                    reused_player = p
+                    self.players.remove(p)
+                    break
+                    
+            if reused_player:
+                reused_player['offset'] = c['offset_sec']
+                reused_player['media_offset'] = c.get('media_offset', 0.0)
+                reused_player['duration'] = c.get('duration', 60.0)
+                reused_player['track'] = c['track']
+                new_players.append(reused_player)
+            else:
+                player = QMediaPlayer()
+                audio_out = QAudioOutput()
+                audio_out.setVolume(1.0)
+                player.setAudioOutput(audio_out)
+                player.setSource(QUrl.fromLocalFile(c['path']))
+                
+                new_players.append({
+                    'path': c['path'],
+                    'player': player,
+                    'output': audio_out,
+                    'offset': c['offset_sec'],
+                    'media_offset': c.get('media_offset', 0.0),
+                    'duration': c.get('duration', 60.0),
+                    'track': c['track'],
+                    'is_active': False
+                })
+                
+        # Clean up unused players
+        for p in self.players:
+            p['player'].stop()
+            p['output'].deleteLater()
+            p['player'].deleteLater()
+            
+        self.players = new_players
+            
+    def set_playing(self, is_playing, master_sec):
+        self.master_playing = is_playing
+        self.update_position(master_sec)
+        if not is_playing:
+            for p in self.players:
+                p['player'].pause()
+                p['is_active'] = False
+
+    def update_position(self, master_sec):
+        for p in self.players:
+            t_internal = master_sec - p['offset']
+            if 0 <= t_internal < p['duration']:
+                target_media_pos = t_internal + p['media_offset']
+                if self.master_playing:
+                    if not p['is_active']:
+                        p['player'].setPosition(int(target_media_pos * 1000))
+                        p['player'].play()
+                        p['is_active'] = True
+                    else:
+                        if abs(p['player'].position() - int(target_media_pos * 1000)) > 300:
+                            p['player'].setPosition(int(target_media_pos * 1000))
+                else:
+                    p['player'].setPosition(int(target_media_pos * 1000))
+                    if p['is_active']:
+                        p['player'].pause()
+                        p['is_active'] = False
+            else:
+                if p['is_active']:
+                    p['player'].pause()
+                    p['is_active'] = False
+
 class AudioTimelineWidget(QGraphicsView):
     """DaVinci Resolve Style Çoklu Kanal Ses Zaman Çizelgesi"""
     
     seek_requested = pyqtSignal(float)
+    timeline_changed = pyqtSignal(list)
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1098,19 +1226,30 @@ class AudioTimelineWidget(QGraphicsView):
         self.ensureVisible(x, 0, 1, self.height(), 50, 0)
         
     def set_main_video(self, file_path, duration_sec):
-        if self.main_video_clip and self.main_video_clip.scene() == self.scene:
-            self.scene.removeItem(self.main_video_clip)
-        if self.main_audio_clip and self.main_audio_clip.scene() == self.scene:
-            self.scene.removeItem(self.main_audio_clip)
+        if self.main_video_clip:
+            if self.main_video_clip.scene() == self.scene:
+                self.scene.removeItem(self.main_video_clip)
+            if self.main_video_clip in self.clips:
+                self.clips.remove(self.main_video_clip)
+                
+        if self.main_audio_clip:
+            if self.main_audio_clip.scene() == self.scene:
+                self.scene.removeItem(self.main_audio_clip)
+            if self.main_audio_clip in self.clips:
+                self.clips.remove(self.main_audio_clip)
             
         self.main_video_clip = AudioClipItem(file_path, 0, duration_sec, self.pixels_per_second, 0, clip_type='video', is_main=True)
         self.scene.addItem(self.main_video_clip)
+        self.clips.append(self.main_video_clip)
         
         self.main_audio_clip = AudioClipItem(file_path, 0, duration_sec, self.pixels_per_second, 1, clip_type='audio', is_main=True)
         self.scene.addItem(self.main_audio_clip)
+        self.clips.append(self.main_audio_clip)
         
         if duration_sec > self.total_duration:
             self.set_duration(duration_sec + 20)
+            
+        self.get_mix_data()
             
     def add_clip(self, file_path, duration_sec=None):
         if duration_sec is None:
@@ -1123,11 +1262,14 @@ class AudioTimelineWidget(QGraphicsView):
         self.undo_stack.push(cmd)
 
     def get_mix_data(self):
+        """Returns sorted list of audio items for backend processing"""
         mix_data = []
         for c in self.clips:
-            if c.clip_type == 'audio' and not c.is_main:
-                mix_data.append({'path': c.file_path, 'offset_sec': c.start_time, 'track': c.track_idx})
-        return sorted(mix_data, key=lambda x: (x['track'], x['offset_sec']))
+            if c.clip_type == 'audio':
+                mix_data.append({'path': c.file_path, 'offset_sec': c.start_time, 'media_offset': c.media_start, 'track': c.track_idx, 'duration': c.duration})
+        mix_data = sorted(mix_data, key=lambda x: (x['track'], x['offset_sec']))
+        self.timeline_changed.emit(mix_data)
+        return mix_data
 
     def contextMenuEvent(self, event):
         item = self.itemAt(event.pos())
@@ -1195,13 +1337,15 @@ class AudioTimelineWidget(QGraphicsView):
         start_time = max(0.0, drop_pos.x() / self.pixels_per_second)
         track_idx = max(0, min(self.num_tracks - 1, int(drop_pos.y() / self.track_height)))
         
+        from pathlib import Path
         for url in urls:
             path = url.toLocalFile()
             if not path: continue
             
             # Detect type
-            ext = path.lower().split('.')[-1] if '.' in path else ''
-            clip_type = 'video' if ext in ['mp4', 'avi', 'mov', 'mkv', 'webm'] else 'audio'
+            # Audio dosyası mı video dosyası mı?
+            ext = Path(path).suffix.lower()
+            clip_type = 'audio' if ext in ['.mp3', '.wav', '.aac', '.ogg', '.m4a'] else 'video'
             
             info = self.media_manager.add_media(path)
             duration = info.get('duration', 10.0) if info else 10.0

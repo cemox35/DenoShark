@@ -415,6 +415,19 @@ class MainWindow(QMainWindow):
         widget.setLayout(layout)
         return widget
     
+    def _on_player_position_changed(self, pos_ms):
+        sec = pos_ms / 1000.0
+        self.multi_track_timeline.update_playhead(sec)
+        if hasattr(self, 'audio_engine'):
+            self.audio_engine.update_position(sec)
+
+    def _on_player_state_changed(self, state):
+        from PyQt6.QtMultimedia import QMediaPlayer
+        is_playing = (state == QMediaPlayer.PlaybackState.PlayingState)
+        if hasattr(self, 'audio_engine') and hasattr(self, 'audio_timeline_widget'):
+            sec = self.audio_timeline_widget.media_player.position() / 1000.0
+            self.audio_engine.set_playing(is_playing, sec)
+
     def _create_audio_tab(self):
         """Ses işleme sekmesi"""
         widget = QWidget()
@@ -436,9 +449,20 @@ class MainWindow(QMainWindow):
         self.multi_track_timeline = AudioTimelineWidget()
         layout.addWidget(self.multi_track_timeline)
         
-        # Sync playhead
+        # Real-time audio engine
+        from ui.widgets import RealTimeAudioEngine
+        self.audio_engine = RealTimeAudioEngine()
+        self.multi_track_timeline.timeline_changed.connect(self.audio_engine.sync_clips)
+        
+        # Mute original video
+        self.audio_timeline_widget.audio_output.setVolume(0.0)
+        
+        # Sync playhead and audio engine
         self.audio_timeline_widget.media_player.positionChanged.connect(
-            lambda pos: self.multi_track_timeline.update_playhead(pos / 1000.0)
+            lambda pos: self._on_player_position_changed(pos)
+        )
+        self.audio_timeline_widget.media_player.playbackStateChanged.connect(
+            lambda state: self._on_player_state_changed(state)
         )
         self.audio_timeline_widget.media_player.durationChanged.connect(
             lambda dur: self.multi_track_timeline.set_duration(dur / 1000.0)
@@ -668,37 +692,51 @@ class MainWindow(QMainWindow):
     def on_media_selected(self, file_path: str):
         """Media Pool'dan dosya seçildiğinde aktif sekmeye yükle"""
         current_tab = self.stacked_widget.currentIndex()
+        from pathlib import Path
+        ext = Path(file_path).suffix.lower()
+        is_audio = ext in ['.mp3', '.wav', '.aac', '.ogg', '.m4a']
+        
         if current_tab == 0: # Video İşleme
-            self.load_video_internal(file_path)
+            self.load_video_internal(file_path, is_audio)
         elif current_tab == 1: # Ses İşleme
-            self.load_video_audio_internal(file_path)
+            if is_audio:
+                if hasattr(self, 'multi_track_timeline'):
+                    self.multi_track_timeline.add_clip(file_path)
+                    self.statusBar().showMessage(f"✅ Ses klibi eklendi: {Path(file_path).name}")
+            else:
+                self.load_video_audio_internal(file_path)
         else:
             self.statusBar().showMessage("Medya eklemek için Video veya Ses İşleme sekmesine gidin.")
     
-    def load_video_internal(self, file_path: str):
+    def load_video_internal(self, file_path: str, is_audio: bool = False):
         """Video'yu iç olarak yükle"""
         try:
             self.current_video_path = file_path
-            handler = VideoHandler(file_path)
-            info = handler.get_info()
             
-            duration = info['duration_seconds']
+            if is_audio:
+                from utils.media_manager import MediaManager
+                mm = MediaManager()
+                info = mm.add_media(file_path)
+                duration = info.get('duration', 0.0) if info else 10.0
+            else:
+                handler = VideoHandler(file_path)
+                info = handler.get_info()
+                duration = info['duration_seconds']
             
             # Load video into advanced trimmer
             self.timeline_widget.load_video(file_path)
             
-            if hasattr(self, 'multi_track_timeline'):
+            if hasattr(self, 'multi_track_timeline') and not is_audio:
                 self.multi_track_timeline.set_main_video(file_path, duration)
             
             # Status mesajı
-            self.statusBar().showMessage(f"✅ Video yüklendi: {Path(file_path).name} ({duration:.1f}s)")
-            logger.info(f"Video yüklendi: {file_path}")
+            type_str = "Ses" if is_audio else "Video"
+            self.statusBar().showMessage(f"✅ {type_str} yüklendi: {Path(file_path).name} ({duration:.1f}s)")
+            logger.info(f"{type_str} yüklendi: {file_path}")
         
         except Exception as e:
-            logger.error(f"Video yükleme hatası: {e}")
+            logger.error(f"Medya yükleme hatası: {e}")
             self.statusBar().showMessage(f"❌ Hata: {str(e)[:50]}")
-    
-    # load_video_audio removed as handled by Media Pool
     
     def load_video_audio_internal(self, file_path: str):
         """Ses işleme sekmesi için video'yu iç olarak yükle"""
