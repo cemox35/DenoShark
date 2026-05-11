@@ -21,7 +21,7 @@ from video_processor import (
     VideoHandler, VideoTrimmer, AudioExtractor,
     NoiseReducer, AudioMixer, VideoExporter
 )
-from .widgets import MediaFileDropper, VideoTimelineWidget
+from .widgets import MediaFileDropper, AdvancedVideoTrimmer
 
 logger = setup_logger(__name__)
 
@@ -333,30 +333,9 @@ class MainWindow(QMainWindow):
         trim_layout = QVBoxLayout()
         trim_layout.setSpacing(15)
         
-        # Timeline widget (video yüklendikten sonra gösterilecek)
-        self.timeline_widget = None
-        self.timeline_container = QWidget()
-        self.timeline_container_layout = QVBoxLayout()
-        self.timeline_container_layout.setContentsMargins(0, 0, 0, 0)
-        self.timeline_container.setLayout(self.timeline_container_layout)
-        trim_layout.addWidget(self.timeline_container)
-        
-        # Manuel giriş (timeline yüklü değilse)
-        manual_layout = QHBoxLayout()
-        manual_layout.addWidget(QLabel("Başlangıç (s):"))
-        self.trim_start = QDoubleSpinBox()
-        self.trim_start.setMaximum(10000)
-        manual_layout.addWidget(self.trim_start)
-        
-        manual_layout.addSpacing(20)
-        
-        manual_layout.addWidget(QLabel("Bitiş (s):"))
-        self.trim_end = QDoubleSpinBox()
-        self.trim_end.setMaximum(10000)
-        self.trim_end.setValue(10)
-        manual_layout.addWidget(self.trim_end)
-        manual_layout.addStretch()
-        trim_layout.addLayout(manual_layout)
+        # Advanced Timeline and Preview widget
+        self.timeline_widget = AdvancedVideoTrimmer()
+        trim_layout.addWidget(self.timeline_widget)
         
         trim_btn = QPushButton("✂️ Video Kırp")
         trim_btn.setObjectName("primary_action")
@@ -401,13 +380,9 @@ class MainWindow(QMainWindow):
         load_group_audio.setLayout(load_layout_audio)
         layout.addWidget(load_group_audio)
         
-        # Video timeline (ses işleme için)
-        self.audio_timeline_widget = None
-        self.audio_timeline_container = QWidget()
-        self.audio_timeline_container_layout = QVBoxLayout()
-        self.audio_timeline_container_layout.setContentsMargins(0, 0, 0, 0)
-        self.audio_timeline_container.setLayout(self.audio_timeline_container_layout)
-        layout.addWidget(self.audio_timeline_container)
+        # Advanced Timeline and Preview widget
+        self.audio_timeline_widget = AdvancedVideoTrimmer()
+        layout.addWidget(self.audio_timeline_widget)
         
         # Horizontal Layout for Tools
         tools_layout = QHBoxLayout()
@@ -417,20 +392,6 @@ class MainWindow(QMainWindow):
         extract_group = QGroupBox("2. Ses İşlemleri")
         extract_layout = QVBoxLayout()
         extract_layout.setSpacing(15)
-        
-        extract_layout.addWidget(QLabel("Çıkartılacak aralık:"))
-        extract_manual_layout = QHBoxLayout()
-        extract_manual_layout.addWidget(QLabel("Başlangıç (s):"))
-        self.audio_extract_start = QDoubleSpinBox()
-        self.audio_extract_start.setMaximum(10000)
-        extract_manual_layout.addWidget(self.audio_extract_start)
-        
-        extract_manual_layout.addWidget(QLabel("Bitiş (s):"))
-        self.audio_extract_end = QDoubleSpinBox()
-        self.audio_extract_end.setMaximum(10000)
-        self.audio_extract_end.setValue(10)
-        extract_manual_layout.addWidget(self.audio_extract_end)
-        extract_layout.addLayout(extract_manual_layout)
         
         # Checkbox'lar
         checkbox_layout = QVBoxLayout()
@@ -629,38 +590,9 @@ class MainWindow(QMainWindow):
             info = handler.get_info()
             
             duration = info['duration_seconds']
-            self.trim_end.setValue(duration)
             
-            # Timeline widget'ı oluştur
-            if self.timeline_widget:
-                self.timeline_widget.close()
-            
-            self.timeline_widget = VideoTimelineWidget(file_path)
-            
-            # Eski layout'u temizle
-            while self.timeline_container_layout.count():
-                self.timeline_container_layout.takeAt(0).widget().deleteLater()
-            
-            self.timeline_container_layout.addWidget(self.timeline_widget)
-            
-            # Timeline slider'larını spinbox'lara bağla (senkronizasyon)
-            # Slider değeri frame numarası, FPS ile bölüp saniyeye çevir
-            fps = self.timeline_widget.fps
-            self.timeline_widget.start_slider.valueChanged.connect(
-                lambda v: self.trim_start.blockSignals(True) or self.trim_start.setValue(v / fps) or self.trim_start.blockSignals(False)
-            )
-            self.timeline_widget.end_slider.valueChanged.connect(
-                lambda v: self.trim_end.blockSignals(True) or self.trim_end.setValue(v / fps) or self.trim_end.blockSignals(False)
-            )
-            
-            # Spinbox'ları timeline slider'larına bağla
-            # Spinbox değeri saniye, FPS ile çarpıp frame numarasına çevir
-            self.trim_start.valueChanged.connect(
-                lambda v: self.timeline_widget.start_slider.blockSignals(True) or self.timeline_widget.start_slider.setValue(int(v * fps)) or self.timeline_widget.start_slider.blockSignals(False)
-            )
-            self.trim_end.valueChanged.connect(
-                lambda v: self.timeline_widget.end_slider.blockSignals(True) or self.timeline_widget.end_slider.setValue(int(v * fps)) or self.timeline_widget.end_slider.blockSignals(False)
-            )
+            # Load video into advanced trimmer
+            self.timeline_widget.load_video(file_path)
             
             # Status mesajı
             self.statusBar().showMessage(f"✅ Video yüklendi: {Path(file_path).name} ({duration:.1f}s)")
@@ -691,36 +623,9 @@ class MainWindow(QMainWindow):
             info = handler.get_info()
             
             duration = info['duration_seconds']
-            self.audio_extract_end.setValue(duration)
             
-            # Timeline widget'ı oluştur
-            if self.audio_timeline_widget:
-                self.audio_timeline_widget.close()
-            
-            self.audio_timeline_widget = VideoTimelineWidget(file_path)
-            
-            # Eski layout'u temizle
-            while self.audio_timeline_container_layout.count():
-                self.audio_timeline_container_layout.takeAt(0).widget().deleteLater()
-            
-            self.audio_timeline_container_layout.addWidget(self.audio_timeline_widget)
-            
-            # Timeline slider'larını spinbox'lara bağla (senkronizasyon)
-            fps = self.audio_timeline_widget.fps
-            self.audio_timeline_widget.start_slider.valueChanged.connect(
-                lambda v: self.audio_extract_start.blockSignals(True) or self.audio_extract_start.setValue(v / fps) or self.audio_extract_start.blockSignals(False)
-            )
-            self.audio_timeline_widget.end_slider.valueChanged.connect(
-                lambda v: self.audio_extract_end.blockSignals(True) or self.audio_extract_end.setValue(v / fps) or self.audio_extract_end.blockSignals(False)
-            )
-            
-            # Spinbox'ları timeline slider'larına bağla
-            self.audio_extract_start.valueChanged.connect(
-                lambda v: self.audio_timeline_widget.start_slider.blockSignals(True) or self.audio_timeline_widget.start_slider.setValue(int(v * fps)) or self.audio_timeline_widget.start_slider.blockSignals(False)
-            )
-            self.audio_extract_end.valueChanged.connect(
-                lambda v: self.audio_timeline_widget.end_slider.blockSignals(True) or self.audio_timeline_widget.end_slider.setValue(int(v * fps)) or self.audio_timeline_widget.end_slider.blockSignals(False)
-            )
+            # Load video into advanced trimmer
+            self.audio_timeline_widget.load_video(file_path)
             
             # Status mesajı
             self.statusBar().showMessage(f"✅ Video yüklendi (Ses): {Path(file_path).name} ({duration:.1f}s)")
@@ -736,12 +641,8 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Lütfen önce bir video seçin")
             return
         
-        # Timeline'dan değerleri al (varsa), yoksa manual girdileri kullan
-        if self.timeline_widget:
-            start_time, end_time = self.timeline_widget.get_start_end_seconds()
-        else:
-            start_time = self.trim_start.value()
-            end_time = self.trim_end.value()
+        # Timeline'dan değerleri al
+        start_time, end_time = self.timeline_widget.get_start_end_seconds()
         
         output_path, _ = QFileDialog.getSaveFileName(
             self,

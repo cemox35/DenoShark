@@ -1,9 +1,14 @@
 """
 Custom Widgets - Özel PyQt6 bileşenleri
 """
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider, QSpinBox, QFrame, QFileDialog
-from PyQt6.QtCore import Qt, pyqtSignal, QMimeData
-from PyQt6.QtGui import QPixmap, QImage, QDrag
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider, 
+    QSpinBox, QFrame, QFileDialog, QPushButton, QDoubleSpinBox
+)
+from PyQt6.QtCore import Qt, pyqtSignal, QMimeData, QRect, QPoint, QSize, QUrl
+from PyQt6.QtGui import QPixmap, QImage, QDrag, QPainter, QColor, QBrush, QPen, QPalette
+from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
+from PyQt6.QtMultimediaWidgets import QVideoWidget
 import cv2
 from pathlib import Path
 
@@ -55,7 +60,6 @@ class MediaFileDropper(QFrame):
         self.setLayout(layout)
     
     def dragEnterEvent(self, event):
-        """Sürükleme ile giriş"""
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
             self.setStyleSheet("""
@@ -67,7 +71,6 @@ class MediaFileDropper(QFrame):
             """)
     
     def dragLeaveEvent(self, event):
-        """Sürükleme ile çıkış"""
         self.setStyleSheet("""
             #media_dropper {
                 background-color: #1e1e1e;
@@ -81,7 +84,6 @@ class MediaFileDropper(QFrame):
         """)
     
     def dropEvent(self, event):
-        """Dosya bırakıldığında"""
         self.dragLeaveEvent(event)
         urls = event.mimeData().urls()
         if urls:
@@ -95,7 +97,6 @@ class MediaFileDropper(QFrame):
                 self.main_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #ff5555; background: transparent; border: none;")
 
     def mousePressEvent(self, event):
-        """Tıklama ile dosya seçimi"""
         if event.button() == Qt.MouseButton.LeftButton:
             file_path, _ = QFileDialog.getOpenFileName(
                 self,
@@ -108,118 +109,328 @@ class MediaFileDropper(QFrame):
                 self.main_label.setText(f"✅ Yüklendi: {Path(file_path).name}")
                 self.main_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #00a8ff; background: transparent; border: none;")
 
+class RangeSlider(QWidget):
+    """Gelişmiş Çift Yönlü Range Slider"""
+    rangeChanged = pyqtSignal(float, float, str) # start, end, active_handle ('min' veya 'max')
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumHeight(40)
+        self._current_min = 0.0
+        self._current_max = 1.0
+        
+        self._handle_width = 16
+        self._handle_radius = 8
+        self._groove_height = 8
+        
+        self._active_handle = None
+        self.setMouseTracking(True)
+        
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        width = self.width()
+        height = self.height()
+        
+        # Background groove
+        groove_rect = QRect(self._handle_width//2, height//2 - self._groove_height//2, 
+                            width - self._handle_width, self._groove_height)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#2a2a2a"))
+        painter.drawRoundedRect(groove_rect, 4, 4)
+        
+        # Active groove (between handles)
+        min_x = self._handle_width//2 + int(self._current_min * (width - self._handle_width))
+        max_x = self._handle_width//2 + int(self._current_max * (width - self._handle_width))
+        
+        active_rect = QRect(min_x, height//2 - self._groove_height//2, max_x - min_x, self._groove_height)
+        painter.setBrush(QColor("#00a8ff"))
+        painter.drawRoundedRect(active_rect, 4, 4)
+        
+        # Min handle
+        min_handle_rect = QRect(min_x - self._handle_width//2, height//2 - 12, self._handle_width, 24)
+        if self._active_handle == 'min':
+            painter.setBrush(QColor("#ffffff"))
+        else:
+            painter.setBrush(QColor("#e0e0e0"))
+        painter.drawRoundedRect(min_handle_rect, self._handle_radius, self._handle_radius)
+        
+        # Max handle
+        max_handle_rect = QRect(max_x - self._handle_width//2, height//2 - 12, self._handle_width, 24)
+        if self._active_handle == 'max':
+            painter.setBrush(QColor("#ffffff"))
+        else:
+            painter.setBrush(QColor("#e0e0e0"))
+        painter.drawRoundedRect(max_handle_rect, self._handle_radius, self._handle_radius)
+        
+    def mousePressEvent(self, event):
+        min_x = self._handle_width//2 + int(self._current_min * (self.width() - self._handle_width))
+        max_x = self._handle_width//2 + int(self._current_max * (self.width() - self._handle_width))
+        
+        click_x = event.pos().x()
+        
+        if abs(click_x - min_x) < 20:
+            self._active_handle = 'min'
+        elif abs(click_x - max_x) < 20:
+            self._active_handle = 'max'
+        else:
+            self._active_handle = None
+            
+        self.update()
+            
+    def mouseMoveEvent(self, event):
+        if self._active_handle:
+            val = (event.pos().x() - self._handle_width//2) / (self.width() - self._handle_width)
+            val = max(0.0, min(1.0, val))
+            
+            if self._active_handle == 'min':
+                self._current_min = min(val, self._current_max - 0.01)
+            else:
+                self._current_max = max(val, self._current_min + 0.01)
+                
+            self.update()
+            self.rangeChanged.emit(self._current_min, self._current_max, self._active_handle)
+            
+    def mouseReleaseEvent(self, event):
+        self._active_handle = None
+        self.update()
+        
+    def setValues(self, min_val, max_val):
+        self._current_min = max(0.0, min(1.0, min_val))
+        self._current_max = max(0.0, min(1.0, max_val))
+        self.update()
 
-class VideoTimelineWidget(QWidget):
-    """Video timeline widget - kesme noktalarını göster"""
+class AdvancedVideoTrimmer(QWidget):
+    """Profesyonel video izleme ve kırpma aracı (QMediaPlayer)"""
     
-    def __init__(self, video_path: str):
-        super().__init__()
-        self.video_path = video_path
-        self.cap = cv2.VideoCapture(video_path)
-        self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        self.fps = self.cap.get(cv2.CAP_PROP_FPS)
-        self.total_duration = self.total_frames / self.fps if self.fps > 0 else 0
-        
-        self.start_frame = 0
-        self.end_frame = self.total_frames
-        
+    trim_points_changed = pyqtSignal(float, float) # start_sec, end_sec
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.video_path = None
+        self.duration = 0.0
+        self._updating_inputs = False
         self.init_ui()
-    
+        
     def init_ui(self):
-        layout = QVBoxLayout()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
         
-        # Timeline slider
-        slider_layout = QHBoxLayout()
+        # Video Player Area
+        self.video_container = QFrame()
+        self.video_container.setStyleSheet("background-color: #000000; border-radius: 8px; border: 1px solid #2a2a2a;")
+        self.video_container.setMinimumHeight(350)
+        video_layout = QVBoxLayout(self.video_container)
+        video_layout.setContentsMargins(2, 2, 2, 2)
         
-        slider_layout.addWidget(QLabel("Başlangıç:"))
-        self.start_slider = QSlider(Qt.Orientation.Horizontal)
-        self.start_slider.setMinimum(0)
-        self.start_slider.setMaximum(self.total_frames)
-        self.start_slider.setValue(0)
-        self.start_slider.sliderMoved.connect(self.on_start_changed)
-        self.start_slider.valueChanged.connect(self.on_start_changed)  # spinbox ile senkron için
-        slider_layout.addWidget(self.start_slider)
+        self.video_widget = QVideoWidget()
+        self.video_widget.hide()
         
-        self.start_time_label = QLabel("0s")
-        self.start_time_label.setMinimumWidth(50)
-        slider_layout.addWidget(self.start_time_label)
+        self.placeholder_label = QLabel("🎬\nVideo Önizleme")
+        self.placeholder_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.placeholder_label.setStyleSheet("color: #555555; font-size: 24px; font-weight: bold; background: transparent; border: none;")
         
-        layout.addLayout(slider_layout)
+        video_layout.addWidget(self.placeholder_label)
+        video_layout.addWidget(self.video_widget)
+        layout.addWidget(self.video_container)
         
-        # End slider
-        end_slider_layout = QHBoxLayout()
+        # Media Player setup
+        self.media_player = QMediaPlayer()
+        self.audio_output = QAudioOutput()
+        self.media_player.setAudioOutput(self.audio_output)
+        self.media_player.setVideoOutput(self.video_widget)
         
-        end_slider_layout.addWidget(QLabel("Bitiş:"))
-        self.end_slider = QSlider(Qt.Orientation.Horizontal)
-        self.end_slider.setMinimum(0)
-        self.end_slider.setMaximum(self.total_frames)
-        self.end_slider.setValue(self.total_frames)
-        self.end_slider.sliderMoved.connect(self.on_end_changed)
-        self.end_slider.valueChanged.connect(self.on_end_changed)  # spinbox ile senkron için
-        end_slider_layout.addWidget(self.end_slider)
+        self.media_player.positionChanged.connect(self.position_changed)
+        self.media_player.durationChanged.connect(self.duration_changed)
         
-        self.end_time_label = QLabel(f"{self.total_duration:.1f}s")
-        self.end_time_label.setMinimumWidth(50)
-        end_slider_layout.addWidget(self.end_time_label)
+        # Controls Toolbar
+        controls_layout = QHBoxLayout()
+        controls_layout.setContentsMargins(10, 5, 10, 5)
         
-        layout.addLayout(end_slider_layout)
+        self.play_btn = QPushButton("▶")
+        self.play_btn.setFixedSize(40, 40)
+        self.play_btn.setStyleSheet("""
+            QPushButton { border-radius: 20px; background-color: #2d2d2d; font-size: 18px; color: white; border: none; }
+            QPushButton:hover { background-color: #00a8ff; }
+        """)
+        self.play_btn.clicked.connect(self.toggle_playback)
+        self.play_btn.setEnabled(False)
+        controls_layout.addWidget(self.play_btn)
         
-        # Preview frame
-        self.preview_label = QLabel("Preview frame burada gösterilecek")
-        self.preview_label.setMinimumHeight(150)
-        self.preview_label.setStyleSheet("border: 1px solid #ccc; background-color: #000;")
-        layout.addWidget(self.preview_label)
+        self.time_label = QLabel("00:00 / 00:00")
+        self.time_label.setStyleSheet("font-family: monospace; font-size: 14px; color: #a0a0a0; padding-left: 10px; border: none;")
+        controls_layout.addWidget(self.time_label)
         
-        self.setLayout(layout)
+        controls_layout.addStretch()
         
-        # İlk frame'i göster
-        self.show_frame(0)
-    
-    def on_start_changed(self, value):
-        """Başlangıç değiştiğinde"""
-        self.start_frame = value
-        start_time = value / self.fps
-        self.start_time_label.setText(f"{start_time:.1f}s")
-        self.show_frame(value)
-    
-    def on_end_changed(self, value):
-        """Bitiş değiştiğinde"""
-        self.end_frame = value
-        end_time = value / self.fps
-        self.end_time_label.setText(f"{end_time:.1f}s")
-        self.show_frame(value)
-    
-    def show_frame(self, frame_number):
-        """Frame'i göster"""
-        self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
-        ret, frame = self.cap.read()
+        self.vol_btn = QPushButton("🔊")
+        self.vol_btn.setFixedSize(30, 30)
+        self.vol_btn.setStyleSheet("border-radius: 15px; background-color: transparent; font-size: 16px; border: none;")
+        self.vol_btn.clicked.connect(self.toggle_mute)
+        controls_layout.addWidget(self.vol_btn)
         
-        if ret:
-            # Frame'i resize et (arayüze uyacak şekilde)
-            h, w = frame.shape[:2]
-            aspect_ratio = w / h
-            new_h = 150
-            new_w = int(new_h * aspect_ratio)
-            frame = cv2.resize(frame, (new_w, new_h))
+        self.vol_slider = QSlider(Qt.Orientation.Horizontal)
+        self.vol_slider.setRange(0, 100)
+        self.vol_slider.setValue(100)
+        self.vol_slider.setFixedWidth(80)
+        self.vol_slider.valueChanged.connect(self.set_volume)
+        self.vol_slider.setStyleSheet("""
+            QSlider::groove:horizontal { height: 4px; background: #2a2a2a; border-radius: 2px; }
+            QSlider::handle:horizontal { background: #00a8ff; width: 12px; margin: -4px 0; border-radius: 6px; }
+        """)
+        controls_layout.addWidget(self.vol_slider)
+        
+        layout.addLayout(controls_layout)
+        
+        # Range Slider
+        self.range_slider = RangeSlider()
+        self.range_slider.rangeChanged.connect(self.on_range_changed)
+        self.range_slider.setEnabled(False)
+        layout.addWidget(self.range_slider)
+        
+        # Manual Inputs
+        inputs_layout = QHBoxLayout()
+        inputs_layout.setContentsMargins(10, 0, 10, 0)
+        
+        inputs_layout.addWidget(QLabel("Başlangıç:"))
+        self.start_spin = QDoubleSpinBox()
+        self.start_spin.setRange(0, 10000)
+        self.start_spin.setSuffix(" sn")
+        self.start_spin.setDecimals(2)
+        self.start_spin.setFixedWidth(100)
+        self.start_spin.valueChanged.connect(self.on_spin_changed)
+        inputs_layout.addWidget(self.start_spin)
+        
+        inputs_layout.addStretch()
+        
+        inputs_layout.addWidget(QLabel("Bitiş:"))
+        self.end_spin = QDoubleSpinBox()
+        self.end_spin.setRange(0, 10000)
+        self.end_spin.setSuffix(" sn")
+        self.end_spin.setDecimals(2)
+        self.end_spin.setFixedWidth(100)
+        self.end_spin.valueChanged.connect(self.on_spin_changed)
+        inputs_layout.addWidget(self.end_spin)
+        
+        layout.addLayout(inputs_layout)
+        
+    def load_video(self, path: str):
+        self.video_path = path
+        self.media_player.setSource(QUrl.fromLocalFile(path))
+        
+        self.placeholder_label.hide()
+        self.video_widget.show()
+        
+        self.play_btn.setEnabled(True)
+        self.range_slider.setEnabled(True)
+        
+        self.media_player.pause()
+        self.play_btn.setText("▶")
+        
+    def toggle_playback(self):
+        if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self.media_player.pause()
+            self.play_btn.setText("▶")
+        else:
+            # Restart if at end of trim range
+            end_ms = int(self.end_spin.value() * 1000)
+            if self.media_player.position() >= end_ms - 100 and end_ms > 0:
+                self.media_player.setPosition(int(self.start_spin.value() * 1000))
+            self.media_player.play()
+            self.play_btn.setText("⏸")
             
-            # BGR -> RGB
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    def toggle_mute(self):
+        if self.audio_output.isMuted():
+            self.audio_output.setMuted(False)
+            self.vol_btn.setText("🔊")
+        else:
+            self.audio_output.setMuted(True)
+            self.vol_btn.setText("🔇")
             
-            # QImage'e dönüştür
-            h, w, ch = frame.shape
-            bytes_per_line = 3 * w
-            qt_image = QImage(frame.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+    def set_volume(self, value):
+        self.audio_output.setVolume(value / 100.0)
+        if value == 0:
+            self.vol_btn.setText("🔇")
+        else:
+            self.vol_btn.setText("🔊")
             
-            # Pixmap oluştur ve göster
-            pixmap = QPixmap.fromImage(qt_image)
-            self.preview_label.setPixmap(pixmap)
-    
+    def format_time(self, ms):
+        s = ms // 1000
+        m = s // 60
+        s = s % 60
+        return f"{m:02d}:{s:02d}"
+        
+    def position_changed(self, position):
+        if self.duration > 0:
+            self.time_label.setText(f"{self.format_time(position)} / {self.format_time(int(self.duration*1000))}")
+            
+        # Stop at trim end
+        end_ms = int(self.end_spin.value() * 1000)
+        if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            if position >= end_ms and end_ms > 0:
+                self.media_player.pause()
+                self.play_btn.setText("▶")
+                self.media_player.setPosition(int(self.start_spin.value() * 1000))
+        
+    def duration_changed(self, duration):
+        if duration > 0:
+            self.duration = duration / 1000.0
+            self._updating_inputs = True
+            self.start_spin.setMaximum(self.duration)
+            self.end_spin.setMaximum(self.duration)
+            self.end_spin.setValue(self.duration)
+            self._updating_inputs = False
+            self.time_label.setText(f"00:00 / {self.format_time(duration)}")
+            
+            # Initial frame preview
+            self.media_player.setPosition(0)
+            self.media_player.pause()
+
+    def on_range_changed(self, min_val, max_val, active_handle):
+        if self._updating_inputs or self.duration == 0: return
+        self._updating_inputs = True
+        
+        start_sec = min_val * self.duration
+        end_sec = max_val * self.duration
+        
+        self.start_spin.setValue(start_sec)
+        self.end_spin.setValue(end_sec)
+        
+        # Seek to the handle being dragged to show live preview
+        if active_handle == 'max':
+            self.media_player.setPosition(int(end_sec * 1000))
+        else:
+            self.media_player.setPosition(int(start_sec * 1000))
+            
+        self._updating_inputs = False
+        self.trim_points_changed.emit(start_sec, end_sec)
+        
+    def on_spin_changed(self):
+        if self._updating_inputs or self.duration == 0: return
+        self._updating_inputs = True
+        
+        start_sec = self.start_spin.value()
+        end_sec = self.end_spin.value()
+        
+        if start_sec >= end_sec:
+            start_sec = end_sec - 0.1
+            self.start_spin.setValue(start_sec)
+            
+        min_val = start_sec / self.duration
+        max_val = end_sec / self.duration
+        
+        self.range_slider.setValues(min_val, max_val)
+        
+        # Seek to start
+        self.media_player.setPosition(int(start_sec * 1000))
+        
+        self._updating_inputs = False
+        self.trim_points_changed.emit(start_sec, end_sec)
+        
     def get_start_end_seconds(self):
-        """Başlangıç ve bitiş zamanlarını saniye cinsinden döndür"""
-        start_seconds = self.start_frame / self.fps
-        end_seconds = self.end_frame / self.fps
-        return start_seconds, end_seconds
-    
+        return self.start_spin.value(), self.end_spin.value()
+        
     def close(self):
-        """Kaynakları kapat"""
-        self.cap.release()
+        self.media_player.stop()
