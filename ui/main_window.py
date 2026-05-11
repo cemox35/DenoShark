@@ -21,7 +21,7 @@ from video_processor import (
     VideoHandler, VideoTrimmer, AudioExtractor,
     NoiseReducer, AudioMixer, VideoExporter
 )
-from .widgets import MediaPoolWidget, AdvancedVideoTrimmer
+from .widgets import MediaPoolWidget, AdvancedVideoTrimmer, AudioTimelineWidget
 
 logger = setup_logger(__name__)
 
@@ -432,6 +432,18 @@ class MainWindow(QMainWindow):
         self.audio_timeline_widget = AdvancedVideoTrimmer()
         layout.addWidget(self.audio_timeline_widget)
         
+        # DaVinci Style Multitrack Timeline
+        self.multi_track_timeline = AudioTimelineWidget()
+        layout.addWidget(self.multi_track_timeline)
+        
+        # Sync playhead
+        self.audio_timeline_widget.media_player.positionChanged.connect(
+            lambda pos: self.multi_track_timeline.update_playhead(pos / 1000.0)
+        )
+        self.audio_timeline_widget.media_player.durationChanged.connect(
+            lambda dur: self.multi_track_timeline.set_duration(dur / 1000.0)
+        )
+        
         # Horizontal Layout for Tools
         tools_layout = QHBoxLayout()
         tools_layout.setSpacing(20)
@@ -529,7 +541,8 @@ class MainWindow(QMainWindow):
         # Ses karıştırma
         mix_group = QGroupBox("3. Ses Ekleme")
         mix_layout = QVBoxLayout()
-        mix_btn = QPushButton("🎵 Arka Plan Sesi Ekle (Yakında)")
+        mix_btn = QPushButton("🎵 Arka Plan Sesi Ekle")
+        mix_btn.setObjectName("primary_action")
         mix_btn.clicked.connect(self.mix_audio)
         mix_layout.addWidget(mix_btn)
         mix_group.setLayout(mix_layout)
@@ -915,8 +928,37 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("❌ Otomatik güç ayarlanamadı")
     
     def mix_audio(self):
-        """Ses karıştır"""
-        self.statusBar().showMessage("Ses karıştırma özelliği yakında eklenecek")
+        """Ses karıştır (Klip Ekle)"""
+        if not hasattr(self, 'audio_timeline_widget') or not self.audio_timeline_widget.video_path:
+            self.statusBar().showMessage("Lütfen önce bir ana medya yükleyin")
+            return
+            
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Arka Plan Sesi Seç",
+            "",
+            "Ses Dosyaları (*.wav *.mp3 *.aac *.m4a *.flac);;Tüm Dosyalar (*)"
+        )
+        
+        if file_path:
+            try:
+                import soundfile as sf
+                try:
+                    duration = sf.info(file_path).duration
+                except Exception:
+                    # Fallback if soundfile fails
+                    import cv2
+                    cap = cv2.VideoCapture(file_path)
+                    fps = cap.get(cv2.CAP_PROP_FPS)
+                    frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+                    duration = frames / fps if fps > 0 else 10.0
+                    cap.release()
+                    
+                self.multi_track_timeline.add_clip(file_path, duration)
+                self.statusBar().showMessage(f"✅ Zaman çizelgesine eklendi: {Path(file_path).name}")
+            except Exception as e:
+                logger.error(f"Ses ekleme hatası: {e}")
+                self.statusBar().showMessage("❌ Ses dosyası eklenemedi")
     
     def generate_subtitles(self):
         """Otomatik altyazı oluştur"""

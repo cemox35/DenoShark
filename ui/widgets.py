@@ -4,10 +4,11 @@ Custom Widgets - Özel PyQt6 bileşenleri
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider, 
     QSpinBox, QFrame, QFileDialog, QPushButton, QDoubleSpinBox,
-    QListWidget, QListWidgetItem, QLineEdit
+    QListWidget, QListWidgetItem, QLineEdit, QGraphicsView,
+    QGraphicsScene, QGraphicsRectItem, QGraphicsLineItem, QGraphicsTextItem
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QMimeData, QRect, QPoint, QSize, QUrl
-from PyQt6.QtGui import QPixmap, QImage, QDrag, QPainter, QColor, QBrush, QPen, QPalette, QIcon
+from PyQt6.QtCore import Qt, pyqtSignal, QMimeData, QRect, QPoint, QSize, QUrl, QRectF
+from PyQt6.QtGui import QPixmap, QImage, QDrag, QPainter, QColor, QBrush, QPen, QPalette, QIcon, QFont
 from utils.media_manager import MediaManager
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
@@ -629,3 +630,107 @@ class MediaPoolWidget(QFrame):
     def on_item_double_clicked(self, item):
         path = item.data(Qt.ItemDataRole.UserRole)
         self.media_selected.emit(path)
+
+class AudioClipItem(QGraphicsRectItem):
+    """Sürüklenebilir Ses Klibi"""
+    def __init__(self, file_path, start_time, duration, pixels_per_second, track_idx):
+        super().__init__()
+        self.file_path = file_path
+        self.start_time = start_time
+        self.duration = duration
+        self.pps = pixels_per_second
+        self.track_idx = track_idx
+        self.track_height = 40
+        
+        self.setRect(0, 0, self.duration * self.pps, self.track_height - 6)
+        self.setPos(self.start_time * self.pps, self.track_idx * self.track_height + 3)
+        
+        self.setBrush(QBrush(QColor("#0060ad")))
+        self.setPen(QPen(QColor("#00a8ff"), 1))
+        
+        self.setFlag(QGraphicsRectItem.GraphicsItemFlag.ItemIsMovable)
+        self.setFlag(QGraphicsRectItem.GraphicsItemFlag.ItemSendsGeometryChanges)
+        
+        self.label = QGraphicsTextItem(Path(file_path).name, self)
+        self.label.setDefaultTextColor(QColor("#ffffff"))
+        font = QFont("Segoe UI", 8)
+        self.label.setFont(font)
+        
+    def itemChange(self, change, value):
+        if change == QGraphicsRectItem.GraphicsItemChange.ItemPositionChange:
+            new_pos = value
+            new_pos.setY(self.track_idx * self.track_height + 3)
+            if new_pos.x() < 0:
+                new_pos.setX(0)
+            return new_pos
+        elif change == QGraphicsRectItem.GraphicsItemChange.ItemPositionHasChanged:
+            self.start_time = self.scenePos().x() / self.pps
+        return super().itemChange(change, value)
+
+class AudioTimelineWidget(QGraphicsView):
+    """Çoklu Kanal Ses Zaman Çizelgesi"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.scene = QGraphicsScene(self)
+        self.setScene(self.scene)
+        self.setFixedHeight(140)
+        self.setStyleSheet("""
+            QGraphicsView {
+                background-color: #161616;
+                border: 1px solid #2a2a2a;
+                border-radius: 6px;
+            }
+        """)
+        
+        self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        
+        self.pixels_per_second = 50
+        self.total_duration = 0
+        self.clips = []
+        
+        self.playhead = QGraphicsLineItem()
+        pen = QPen(QColor("#ff3b30"), 2)
+        self.playhead.setPen(pen)
+        self.playhead.setZValue(100)
+        self.scene.addItem(self.playhead)
+        
+        self.grid_lines = []
+        
+    def set_duration(self, duration_sec):
+        self.total_duration = duration_sec
+        width = duration_sec * self.pixels_per_second
+        self.scene.setSceneRect(0, 0, width, max(self.height() - 5, 120))
+        self.update_playhead(0)
+        self._draw_grid()
+        
+    def _draw_grid(self):
+        for line in self.grid_lines:
+            self.scene.removeItem(line)
+        self.grid_lines.clear()
+        
+        pen = QPen(QColor("#2a2a2a"), 1)
+        pen.setStyle(Qt.PenStyle.DashLine)
+        
+        for i in range(1, int(self.total_duration) + 1):
+            x = i * self.pixels_per_second
+            line = self.scene.addLine(x, 0, x, self.scene.height(), pen)
+            line.setZValue(-1)
+            self.grid_lines.append(line)
+            
+    def update_playhead(self, current_time_sec):
+        x = current_time_sec * self.pixels_per_second
+        self.playhead.setLine(x, 0, x, self.scene.height())
+        self.ensureVisible(x, 0, 1, self.height(), 50, 0)
+        
+    def add_clip(self, file_path, duration_sec):
+        track_idx = len(self.clips)
+        clip = AudioClipItem(file_path, 0, duration_sec, self.pixels_per_second, track_idx)
+        self.scene.addItem(clip)
+        self.clips.append(clip)
+        
+        max_y = max((c.track_idx + 1) * 40 for c in self.clips)
+        self.scene.setSceneRect(0, 0, max(self.scene.width(), clip.sceneBoundingRect().right() + 50), max(self.height() - 5, max_y + 10))
+        self._draw_grid()
+        
+    def get_mix_data(self):
+        return [{'path': c.file_path, 'offset_sec': c.start_time} for c in self.clips]
