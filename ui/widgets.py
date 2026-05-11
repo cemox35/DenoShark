@@ -632,105 +632,336 @@ class MediaPoolWidget(QFrame):
         self.media_selected.emit(path)
 
 class AudioClipItem(QGraphicsRectItem):
-    """Sürüklenebilir Ses Klibi"""
-    def __init__(self, file_path, start_time, duration, pixels_per_second, track_idx):
+    """Sürüklenebilir Medya Klibi - DaVinci Resolve Style"""
+    def __init__(self, file_path, start_time, duration, pixels_per_second, track_idx, clip_type='audio', is_main=False):
         super().__init__()
         self.file_path = file_path
         self.start_time = start_time
         self.duration = duration
         self.pps = pixels_per_second
         self.track_idx = track_idx
-        self.track_height = 40
+        self.track_height = 50
+        self.clip_type = clip_type
+        self.is_main = is_main
         
-        self.setRect(0, 0, self.duration * self.pps, self.track_height - 6)
-        self.setPos(self.start_time * self.pps, self.track_idx * self.track_height + 3)
+        self.setRect(0, 0, max(1, self.duration * self.pps), self.track_height - 10)
+        self.setPos(self.start_time * self.pps, self.track_idx * self.track_height + 5)
         
-        self.setBrush(QBrush(QColor("#0060ad")))
-        self.setPen(QPen(QColor("#00a8ff"), 1))
-        
-        self.setFlag(QGraphicsRectItem.GraphicsItemFlag.ItemIsMovable)
+        # Premium Styling Flags
+        if not self.is_main:
+            self.setFlag(QGraphicsRectItem.GraphicsItemFlag.ItemIsMovable)
+        self.setFlag(QGraphicsRectItem.GraphicsItemFlag.ItemIsSelectable)
         self.setFlag(QGraphicsRectItem.GraphicsItemFlag.ItemSendsGeometryChanges)
+        self.setAcceptHoverEvents(True)
+        self.is_hovered = False
         
+        # Text Label
         self.label = QGraphicsTextItem(Path(file_path).name, self)
         self.label.setDefaultTextColor(QColor("#ffffff"))
-        font = QFont("Segoe UI", 8)
+        font = QFont("Segoe UI", 9, QFont.Weight.Bold)
         self.label.setFont(font)
+        self.label.setPos(5, 5)
         
+        # Add a tooltip
+        self.setToolTip(f"{Path(file_path).name}\\nStart: {self.start_time:.2f}s\\nDuration: {self.duration:.2f}s")
+
+    def hoverEnterEvent(self, event):
+        self.is_hovered = True
+        self.update()
+        super().hoverEnterEvent(event)
+
+    def hoverLeaveEvent(self, event):
+        self.is_hovered = False
+        self.update()
+        super().hoverLeaveEvent(event)
+
+    def paint(self, painter, option, widget=None):
+        rect = self.rect()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Dynamic Gradient based on clip type and selection
+        if self.clip_type == 'video':
+            base_colors = ("#3a86ff", "#00509d") # Blue for Video
+        else:
+            base_colors = ("#38b000", "#007200") # Green for Audio
+
+        if self.isSelected():
+            color1, color2, border, pen_width = QColor(base_colors[0]), QColor(base_colors[1]), QColor("#ffffff"), 2
+        elif self.is_hovered:
+            color1, color2, border, pen_width = QColor(base_colors[0]).lighter(120), QColor(base_colors[1]).lighter(120), QColor("#ffffff"), 1.5
+        else:
+            color1, color2, border, pen_width = QColor(base_colors[0]).darker(110), QColor(base_colors[1]).darker(110), QColor(base_colors[0]), 1
+            
+        import PyQt6.QtGui as QtGui
+        gradient = QtGui.QLinearGradient(rect.topLeft(), rect.bottomLeft())
+        gradient.setColorAt(0.0, color1)
+        gradient.setColorAt(1.0, color2)
+        
+        painter.setBrush(QtGui.QBrush(gradient))
+        pen = QtGui.QPen(border, pen_width)
+        painter.setPen(pen)
+        painter.drawRoundedRect(rect, 5, 5)
+        
+        # Mock Waveform Lines inside the clip for visual texture
+        if self.clip_type == 'audio':
+            painter.setPen(QtGui.QPen(QColor(255, 255, 255, 40), 1))
+            mid_y = rect.height() / 2
+            for i in range(15, int(rect.width() - 15), 8):
+                h = 8 + ((i * 13) % 20)  # Pseudo-random height
+                painter.drawLine(int(rect.x() + i), int(mid_y - h/2), int(rect.x() + i), int(mid_y + h/2))
+
     def itemChange(self, change, value):
-        if change == QGraphicsRectItem.GraphicsItemChange.ItemPositionChange:
+        if change == QGraphicsRectItem.GraphicsItemChange.ItemPositionChange and not self.is_main:
             new_pos = value
-            new_pos.setY(self.track_idx * self.track_height + 3)
+            # Snap to vertical tracks (only allow dropping on Audio tracks index >= 1)
+            track = max(1, round((new_pos.y() - 5) / self.track_height))
+            self.track_idx = track
+            new_pos.setY(self.track_idx * self.track_height + 5)
+            
+            # Prevent going out of left bounds
             if new_pos.x() < 0:
                 new_pos.setX(0)
             return new_pos
+            
         elif change == QGraphicsRectItem.GraphicsItemChange.ItemPositionHasChanged:
             self.start_time = self.scenePos().x() / self.pps
+            self.setToolTip(f"{Path(self.file_path).name}\\nStart: {self.start_time:.2f}s\\nDuration: {self.duration:.2f}s")
+            # Update parent scene boundaries if moved far right
+            if self.scene():
+                scene = self.scene()
+                view = scene.views()[0] if scene.views() else None
+                if view and hasattr(view, 'update_bounds_for_clip'):
+                    view.update_bounds_for_clip(self)
         return super().itemChange(change, value)
 
+
 class AudioTimelineWidget(QGraphicsView):
-    """Çoklu Kanal Ses Zaman Çizelgesi"""
+    """DaVinci Resolve Style Çoklu Kanal Ses Zaman Çizelgesi"""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.scene = QGraphicsScene(self)
         self.setScene(self.scene)
-        self.setFixedHeight(140)
+        self.setFixedHeight(220)
+        
         self.setStyleSheet("""
             QGraphicsView {
-                background-color: #161616;
+                background-color: #121212;
                 border: 1px solid #2a2a2a;
-                border-radius: 6px;
+                border-radius: 8px;
             }
         """)
         
         self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self.setAcceptDrops(True)
         
+        # Zoom and Scale variables
         self.pixels_per_second = 50
-        self.total_duration = 0
+        self.total_duration = 60  # initial base duration in seconds
         self.clips = []
+        self.main_video_clip = None
+        self.main_audio_clip = None
         
-        self.playhead = QGraphicsLineItem()
-        pen = QPen(QColor("#ff3b30"), 2)
-        self.playhead.setPen(pen)
-        self.playhead.setZValue(100)
-        self.scene.addItem(self.playhead)
+        self.track_height = 50
+        self.num_tracks = 5 # 0: V1, 1: A1, 2: A2, 3: A3, 4: A4
+        
+        self.media_manager = MediaManager()
         
         self.grid_lines = []
+        self.track_backgrounds = []
         
+        self._init_playhead()
+        self._update_scene_rect()
+        self._draw_background()
+        
+    def _init_playhead(self):
+        # Playhead Line
+        self.playhead_line = QGraphicsLineItem()
+        pen = QPen(QColor("#ff3b30"), 2)
+        self.playhead_line.setPen(pen)
+        self.playhead_line.setZValue(100)
+        self.scene.addItem(self.playhead_line)
+        
+        # Playhead Top Triangle
+        import PyQt6.QtGui as QtGui
+        import PyQt6.QtCore as QtCore
+        from PyQt6.QtWidgets import QGraphicsPolygonItem
+        self.playhead_head = QGraphicsPolygonItem()
+        poly = QtGui.QPolygonF([
+            QtCore.QPointF(-8, 0),
+            QtCore.QPointF(8, 0),
+            QtCore.QPointF(0, 10)
+        ])
+        self.playhead_head.setPolygon(poly)
+        self.playhead_head.setBrush(QtGui.QBrush(QColor("#ff3b30")))
+        self.playhead_head.setPen(QtGui.QPen(Qt.PenStyle.NoPen))
+        self.playhead_head.setZValue(101)
+        self.scene.addItem(self.playhead_head)
+
     def set_duration(self, duration_sec):
-        self.total_duration = duration_sec
-        width = duration_sec * self.pixels_per_second
-        self.scene.setSceneRect(0, 0, width, max(self.height() - 5, 120))
-        self.update_playhead(0)
-        self._draw_grid()
+        if duration_sec <= 0: return
+        self.total_duration = max(duration_sec, 60)
+        self._update_scene_rect()
+        self._draw_background()
         
-    def _draw_grid(self):
-        for line in self.grid_lines:
-            self.scene.removeItem(line)
+    def _update_scene_rect(self):
+        width = max(self.width(), self.total_duration * self.pixels_per_second)
+        height = max(self.height() - 5, self.num_tracks * self.track_height)
+        self.scene.setSceneRect(0, 0, width, height)
+        
+    def update_bounds_for_clip(self, clip):
+        end_time = clip.start_time + clip.duration
+        if end_time > self.total_duration - 5:
+            self.total_duration = end_time + 20
+            self._update_scene_rect()
+            self._draw_background()
+
+    def _draw_background(self):
+        # Clear existing background items
+        for item in self.track_backgrounds + self.grid_lines:
+            if item.scene() == self.scene:
+                self.scene.removeItem(item)
+        self.track_backgrounds.clear()
         self.grid_lines.clear()
         
-        pen = QPen(QColor("#2a2a2a"), 1)
-        pen.setStyle(Qt.PenStyle.DashLine)
+        width = self.scene.width()
+        import PyQt6.QtGui as QtGui
         
-        for i in range(1, int(self.total_duration) + 1):
+        # Draw tracks
+        for i in range(self.num_tracks):
+            y = i * self.track_height
+            bg_color = QColor("#1e1e1e") if i % 2 == 0 else QColor("#181818")
+            bg_rect = self.scene.addRect(0, y, width, self.track_height, QtGui.QPen(Qt.PenStyle.NoPen), QtGui.QBrush(bg_color))
+            bg_rect.setZValue(-10)
+            self.track_backgrounds.append(bg_rect)
+            
+            # Bottom border
+            border_line = self.scene.addLine(0, y + self.track_height, width, y + self.track_height, QtGui.QPen(QColor("#2a2a2a")))
+            border_line.setZValue(-9)
+            self.track_backgrounds.append(border_line)
+            
+            # Track Label
+            track_name = f"V1" if i == 0 else f"A{i}"
+            text = self.scene.addText(track_name)
+            text.setDefaultTextColor(QColor("#a0a0a0") if i == 0 else QColor("#666666"))
+            font = QFont("Segoe UI", 9, QFont.Weight.Bold)
+            text.setFont(font)
+            text.setPos(5, y + (self.track_height/2) - 10)
+            text.setZValue(-8)
+            self.track_backgrounds.append(text)
+
+        # Draw Time Grid
+        grid_pen = QtGui.QPen(QColor("#333333"), 1, Qt.PenStyle.DashLine)
+        for i in range(0, int(self.total_duration) + 1, 5):
             x = i * self.pixels_per_second
-            line = self.scene.addLine(x, 0, x, self.scene.height(), pen)
-            line.setZValue(-1)
+            line = self.scene.addLine(x, 0, x, self.scene.height(), grid_pen)
+            line.setZValue(-9)
             self.grid_lines.append(line)
             
+            if i % 10 == 0:
+                t_text = self.scene.addText(f"{i}s")
+                t_text.setDefaultTextColor(QColor("#888888"))
+                font = QFont("Segoe UI", 7)
+                t_text.setFont(font)
+                t_text.setPos(x + 2, 0)
+                t_text.setZValue(-8)
+                self.grid_lines.append(t_text)
+
     def update_playhead(self, current_time_sec):
         x = current_time_sec * self.pixels_per_second
-        self.playhead.setLine(x, 0, x, self.scene.height())
+        self.playhead_line.setLine(x, 0, x, self.scene.height())
+        self.playhead_head.setPos(x, 0)
         self.ensureVisible(x, 0, 1, self.height(), 50, 0)
         
-    def add_clip(self, file_path, duration_sec):
-        track_idx = len(self.clips)
-        clip = AudioClipItem(file_path, 0, duration_sec, self.pixels_per_second, track_idx)
+    def set_main_video(self, file_path, duration_sec):
+        # Remove existing main video/audio if present
+        if self.main_video_clip and self.main_video_clip.scene() == self.scene:
+            self.scene.removeItem(self.main_video_clip)
+        if self.main_audio_clip and self.main_audio_clip.scene() == self.scene:
+            self.scene.removeItem(self.main_audio_clip)
+            
+        # Add V1 Clip (Track 0)
+        self.main_video_clip = AudioClipItem(file_path, 0, duration_sec, self.pixels_per_second, 0, clip_type='video', is_main=True)
+        self.scene.addItem(self.main_video_clip)
+        
+        # Add A1 Clip (Track 1)
+        self.main_audio_clip = AudioClipItem(file_path, 0, duration_sec, self.pixels_per_second, 1, clip_type='audio', is_main=True)
+        self.scene.addItem(self.main_audio_clip)
+        
+        if duration_sec > self.total_duration:
+            self.set_duration(duration_sec + 20)
+            
+    def add_clip(self, file_path, duration_sec=None):
+        if duration_sec is None:
+            info = self.media_manager.add_media(file_path)
+            if info:
+                duration_sec = info['duration']
+            else:
+                duration_sec = 10.0
+                
+        # Simple track allocation: start from A2 (index 2) up to A4
+        track_idx = 2 + (len([c for c in self.clips if not c.is_main]) % (self.num_tracks - 2))
+        
+        clip = AudioClipItem(file_path, 0, duration_sec, self.pixels_per_second, track_idx, clip_type='audio', is_main=False)
         self.scene.addItem(clip)
         self.clips.append(clip)
         
-        max_y = max((c.track_idx + 1) * 40 for c in self.clips)
-        self.scene.setSceneRect(0, 0, max(self.scene.width(), clip.sceneBoundingRect().right() + 50), max(self.height() - 5, max_y + 10))
-        self._draw_grid()
-        
+        if clip.duration > self.total_duration:
+            self.set_duration(clip.duration + 20)
+            
     def get_mix_data(self):
-        return [{'path': c.file_path, 'offset_sec': c.start_time} for c in self.clips]
+        """Returns sorted list of audio items for backend processing"""
+        mix_data = []
+        for c in self.clips:
+            if c.clip_type == 'audio' and not c.is_main:
+                mix_data.append({'path': c.file_path, 'offset_sec': c.start_time, 'track': c.track_idx})
+        return sorted(mix_data, key=lambda x: (x['track'], x['offset_sec']))
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            self.setStyleSheet("""
+                QGraphicsView {
+                    background-color: #1a1a1a;
+                    border: 2px solid #00a8ff;
+                    border-radius: 8px;
+                }
+            """)
+            
+    def dragLeaveEvent(self, event):
+        self.setStyleSheet("""
+            QGraphicsView {
+                background-color: #121212;
+                border: 1px solid #2a2a2a;
+                border-radius: 8px;
+            }
+        """)
+        
+    def dropEvent(self, event):
+        self.dragLeaveEvent(event)
+        urls = event.mimeData().urls()
+        
+        drop_pos = self.mapToScene(event.position().toPoint())
+        start_time = max(0.0, drop_pos.x() / self.pixels_per_second)
+        track_idx = max(2, min(self.num_tracks - 1, int(drop_pos.y() / self.track_height)))
+        
+        for url in urls:
+            path = url.toLocalFile()
+            if not path: continue
+            
+            info = self.media_manager.add_media(path)
+            if info:
+                duration = info.get('duration', 10.0)
+                clip = AudioClipItem(path, start_time, duration, self.pixels_per_second, track_idx, clip_type='audio', is_main=False)
+                self.scene.addItem(clip)
+                self.clips.append(clip)
+                
+                start_time += duration + 0.5 # Offset consecutive drops
+                
+                if start_time > self.total_duration:
+                    self.set_duration(start_time + 20)
+    
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_scene_rect()
+        self._draw_background()

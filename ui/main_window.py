@@ -684,6 +684,9 @@ class MainWindow(QMainWindow):
             # Load video into advanced trimmer
             self.timeline_widget.load_video(file_path)
             
+            if hasattr(self, 'multi_track_timeline'):
+                self.multi_track_timeline.set_main_video(file_path, duration)
+            
             # Status mesajı
             self.statusBar().showMessage(f"✅ Video yüklendi: {Path(file_path).name} ({duration:.1f}s)")
             logger.info(f"Video yüklendi: {file_path}")
@@ -705,6 +708,9 @@ class MainWindow(QMainWindow):
             
             # Load video into advanced trimmer
             self.audio_timeline_widget.load_video(file_path)
+            
+            if hasattr(self, 'multi_track_timeline'):
+                self.multi_track_timeline.set_main_video(file_path, duration)
             
             # Status mesajı
             self.statusBar().showMessage(f"✅ Video yüklendi (Ses): {Path(file_path).name} ({duration:.1f}s)")
