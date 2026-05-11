@@ -443,6 +443,9 @@ class MainWindow(QMainWindow):
         self.audio_timeline_widget.media_player.durationChanged.connect(
             lambda dur: self.multi_track_timeline.set_duration(dur / 1000.0)
         )
+        self.multi_track_timeline.seek_requested.connect(
+            lambda sec: self.audio_timeline_widget.media_player.setPosition(int(sec * 1000))
+        )
         
         # Horizontal Layout for Tools
         tools_layout = QHBoxLayout()
