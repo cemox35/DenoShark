@@ -98,6 +98,26 @@ QGroupBox::title {
     border-radius: 4px;
 }
 
+/* Splitter */
+QSplitter::handle {
+    background-color: #1e1e1e;
+}
+QSplitter::handle:horizontal {
+    width: 2px;
+}
+QSplitter::handle:vertical {
+    height: 2px;
+}
+QSplitter::handle:hover {
+    background-color: #00a8ff;
+}
+QSplitter::handle:horizontal:hover {
+    cursor: split-h;
+}
+QSplitter::handle:vertical:hover {
+    cursor: split-v;
+}
+
 /* Buttons */
 QPushButton {
     background-color: #2d2d2d;
@@ -274,10 +294,19 @@ class MainWindow(QMainWindow):
         version_label.setStyleSheet("color: #666666; padding-left: 20px;")
         sidebar_layout.addWidget(version_label)
         
-        # Workspace Splitter (Vertical)
-        self.workspace_splitter = QSplitter(Qt.Orientation.Vertical)
+        # Main Splitter (3 Columns)
+        self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
         
-        # Upper part: Content Area (Tabs)
+        # Add Column 1: Sidebar
+        self.main_splitter.addWidget(self.sidebar)
+        
+        # Add Column 2: Media Pool
+        self.media_pool = MediaPoolWidget()
+        self.media_pool.media_selected.connect(self.on_media_selected)
+        self.media_pool.setMinimumWidth(250)
+        self.main_splitter.addWidget(self.media_pool)
+        
+        # Add Column 3: Workspace (Content Area)
         self.content_area = QWidget()
         self.content_area.setObjectName("content_area")
         content_layout = QVBoxLayout(self.content_area)
@@ -285,17 +314,15 @@ class MainWindow(QMainWindow):
         
         self.stacked_widget = QStackedWidget()
         content_layout.addWidget(self.stacked_widget)
-        self.workspace_splitter.addWidget(self.content_area)
+        self.main_splitter.addWidget(self.content_area)
         
-        # Lower part: Media Pool
-        self.media_pool = MediaPoolWidget()
-        self.media_pool.media_selected.connect(self.on_media_selected)
-        self.workspace_splitter.addWidget(self.media_pool)
+        # Set Proportions
+        self.main_splitter.setStretchFactor(0, 0) # Sidebar fixed
+        self.main_splitter.setStretchFactor(1, 1) # Media Pool stretches slightly
+        self.main_splitter.setStretchFactor(2, 4) # Workspace gets max stretch
+        self.main_splitter.setSizes([260, 300, 1000])
         
-        self.workspace_splitter.setSizes([700, 300])
-        
-        main_layout.addWidget(self.sidebar)
-        main_layout.addWidget(self.workspace_splitter)
+        main_layout.addWidget(self.main_splitter)
         
         # Add Pages
         self.stacked_widget.addWidget(self._create_video_tab())

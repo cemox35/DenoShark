@@ -4,7 +4,7 @@ Custom Widgets - Özel PyQt6 bileşenleri
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider, 
     QSpinBox, QFrame, QFileDialog, QPushButton, QDoubleSpinBox,
-    QListWidget, QListWidgetItem
+    QListWidget, QListWidgetItem, QLineEdit
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QMimeData, QRect, QPoint, QSize, QUrl
 from PyQt6.QtGui import QPixmap, QImage, QDrag, QPainter, QColor, QBrush, QPen, QPalette, QIcon
@@ -490,6 +490,25 @@ class MediaPoolWidget(QFrame):
         header_layout.addWidget(add_btn)
         layout.addLayout(header_layout)
         
+        # Search Bar
+        self.search_bar = QLineEdit()
+        self.search_bar.setPlaceholderText("🔍 Medya ara...")
+        self.search_bar.setStyleSheet("""
+            QLineEdit {
+                background-color: #1e1e1e;
+                border: 1px solid #2a2a2a;
+                border-radius: 4px;
+                padding: 8px 12px;
+                color: #e0e0e0;
+                margin-bottom: 5px;
+            }
+            QLineEdit:focus {
+                border: 1px solid #00a8ff;
+            }
+        """)
+        self.search_bar.textChanged.connect(self.filter_media)
+        layout.addWidget(self.search_bar)
+        
         # List Widget
         self.list_widget = QListWidget()
         self.list_widget.setViewMode(QListWidget.ViewMode.IconMode)
@@ -501,6 +520,12 @@ class MediaPoolWidget(QFrame):
         
         layout.addWidget(self.list_widget)
         
+    def filter_media(self, text):
+        search_text = text.lower()
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            item.setHidden(search_text not in item.text().lower())
+            
     def browse_files(self):
         files, _ = QFileDialog.getOpenFileNames(
             self,
