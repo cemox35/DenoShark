@@ -112,17 +112,25 @@ def apply_update_and_restart(zip_path, root_dir):
         zip_ref.extractall(temp_extract_dir)
 
     # 2. update.bat olustur
-    # Bat dosyasi programin kapanmasini 2 saniye bekler, sonra temp icindekileri gercek yere kopyalar
-    # Islem bitince python uzerinden main_window.py (ya da main.py) tekrar acilir ve bat kendi kendini siler.
     bat_path = os.path.join(root_str, 'update.bat')
     
+    # Eger PyInstaller ile .exe yapilmisa sys.executable exe'nin kendisidir. Yoksa python.exe'dir.
+    import sys
+    if getattr(sys, 'frozen', False):
+        # Exe formatinda calisiyorsa
+        exe_name = os.path.basename(sys.executable)
+        restart_cmd = f'start /b "" "{os.path.join(root_str, exe_name)}"'
+    else:
+        # Script formatinda calisiyorsa
+        restart_cmd = f'start /b python "{os.path.join(root_str, "main.py")}"'
+
     bat_content = f"""@echo off
 echo DenoShark Guncelleniyor... Lutfen bekleyin.
 timeout /t 2 /nobreak > NUL
 xcopy /E /Y /C "{temp_extract_dir}\\*" "{root_str}\\"
 rmdir /S /Q "{temp_extract_dir}"
 del /Q "{zip_path}"
-start /b python "{os.path.join(root_str, 'main.py')}"
+{restart_cmd}
 del "%~f0"
 """
     with open(bat_path, "w", encoding="utf-8") as f:
