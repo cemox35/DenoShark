@@ -18,6 +18,7 @@ from utils.config import (
     WINDOW_WIDTH, WINDOW_HEIGHT, APP_NAME, APP_VERSION, TEMP_DIR
 )
 from utils.project_manager import ProjectManager
+from utils.updater import check_for_updates, download_file_from_google_drive, apply_update_and_restart
 from video_processor import (
     VideoHandler, VideoTrimmer, AudioExtractor,
     NoiseReducer, AudioMixer, VideoExporter
@@ -297,6 +298,37 @@ class ExportWorker(QThread):
     """Video export ve altyazı gömme işlemleri thread'i"""
     progress = pyqtSignal(int)
     finished = pyqtSignal(bool, str)
+
+class UpdateCheckWorker(QThread):
+    finished = pyqtSignal(bool, str, str)  # has_update, latest_version, zip_drive_id
+    
+    def __init__(self, current_version):
+        super().__init__()
+        self.current_version = current_version
+        
+    def run(self):
+        try:
+            has_update, latest, zip_id = check_for_updates(self.current_version)
+            self.finished.emit(has_update, latest, zip_id)
+        except Exception:
+            self.finished.emit(False, "", "")
+            
+class UpdateDownloadWorker(QThread):
+    progress = pyqtSignal(int)
+    finished = pyqtSignal(bool, str)
+    
+    def __init__(self, drive_id, destination):
+        super().__init__()
+        self.drive_id = drive_id
+        self.destination = destination
+        
+    def run(self):
+        try:
+            success = download_file_from_google_drive(self.drive_id, self.destination, self.progress.emit)
+            self.finished.emit(success, self.destination)
+        except Exception as e:
+            self.finished.emit(False, str(e))
+
     
     def __init__(self, input_video: str, output_video: str, quality: str, subtitle_file: str = None, subtitle_opts: dict = None):
         super().__init__()
@@ -384,6 +416,9 @@ class MainWindow(QMainWindow):
         self._init_menu_bar()
         self._init_auto_save()
         
+        # Check for updates automatically roughly 2 seconds after startup
+        QTimer.singleShot(2000, self.check_for_updates_auto)
+        
     def _init_menu_bar(self):
         menubar = self.menuBar()
         menubar.setStyleSheet("""
@@ -457,6 +492,12 @@ class MainWindow(QMainWindow):
         import_media_action.triggered.connect(self.import_media)
         import_menu.addAction(import_media_action)
         
+        # Help Menu
+        help_menu = menubar.addMenu("Help")
+        update_action = QAction("Check for Updates", self)
+        update_action.triggered.connect(self.check_for_updates_manual)
+        help_menu.addAction(update_action)
+        
     def _init_auto_save(self):
         self.auto_save_timer = QTimer(self)
         self.auto_save_timer.timeout.connect(self._perform_auto_save)
@@ -519,7 +560,69 @@ class MainWindow(QMainWindow):
     def import_media(self):
         # Already handled by media pool, but we can trigger it directly
         self.media_pool.browse_files()
-    
+        
+    def check_for_updates_manual(self):
+        self.statusBar().showMessage("Checking for updates...")
+        self.update_checker = UpdateCheckWorker(APP_VERSION)
+        self.update_checker.finished.connect(self._on_update_checked_manual)
+        self.update_checker.start()
+        
+    def _on_update_checked_manual(self, has_update, latest_version, zip_drive_id):
+        if has_update:
+            reply = QMessageBox.question(
+                self, "Update Available",
+                f"A new version (v{latest_version}) is available!\nDo you want to download and install it now?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self.start_downloading_update(zip_drive_id, latest_version)
+        else:
+            QMessageBox.information(self, "Up to Date", "You are using the latest version of DenoShark.")
+            self.statusBar().showMessage("Up to date.", 3000)
+            
+    def check_for_updates_auto(self):
+        self.auto_update_checker = UpdateCheckWorker(APP_VERSION)
+        self.auto_update_checker.finished.connect(self._on_update_checked_auto)
+        self.auto_update_checker.start()
+        
+    def _on_update_checked_auto(self, has_update, latest_version, zip_drive_id):
+        if has_update:
+            reply = QMessageBox.question(
+                self, "Update Available",
+                f"A new version (v{latest_version}) is available!\nDo you want to download and install it now?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self.start_downloading_update(zip_drive_id, latest_version)
+                
+    def start_downloading_update(self, zip_drive_id, latest_version):
+        from utils.config import PROJECT_ROOT
+        import os
+        zip_path = os.path.join(PROJECT_ROOT, f"update_v{latest_version}.zip")
+        
+        self.progress_dialog = QProgressDialog("Downloading update...", "Cancel", 0, 100, self)
+        self.progress_dialog.setWindowTitle("DenoShark Updater")
+        self.progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        self.progress_dialog.setAutoClose(False)
+        self.progress_dialog.setAutoReset(False)
+        self.progress_dialog.show()
+        
+        self.update_downloader = UpdateDownloadWorker(zip_drive_id, zip_path)
+        self.update_downloader.progress.connect(self.progress_dialog.setValue)
+        self.update_downloader.finished.connect(lambda success, path: self._on_download_finished(success, path, zip_path))
+        self.update_downloader.start()
+        
+        self.progress_dialog.canceled.connect(self.update_downloader.terminate)
+
+    def _on_download_finished(self, success, path_or_err, zip_path):
+        self.progress_dialog.close()
+        if success:
+            QMessageBox.information(self, "Ready", "Update downloaded! The application will now restart to apply the update.")
+            from utils.config import PROJECT_ROOT
+            apply_update_and_restart(zip_path, PROJECT_ROOT)
+        else:
+            QMessageBox.error(self, "Update Failed", f"Failed to download update:\n{path_or_err}")
+
     def init_ui(self):
         """Arayüzü oluştur"""
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
