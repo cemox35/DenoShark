@@ -3,10 +3,12 @@ Custom Widgets - Özel PyQt6 bileşenleri
 """
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider, 
-    QSpinBox, QFrame, QFileDialog, QPushButton, QDoubleSpinBox
+    QSpinBox, QFrame, QFileDialog, QPushButton, QDoubleSpinBox,
+    QListWidget, QListWidgetItem
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QMimeData, QRect, QPoint, QSize, QUrl
-from PyQt6.QtGui import QPixmap, QImage, QDrag, QPainter, QColor, QBrush, QPen, QPalette
+from PyQt6.QtGui import QPixmap, QImage, QDrag, QPainter, QColor, QBrush, QPen, QPalette, QIcon
+from utils.media_manager import MediaManager
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
 import cv2
@@ -434,3 +436,128 @@ class AdvancedVideoTrimmer(QWidget):
         
     def close(self):
         self.media_player.stop()
+
+class MediaPoolWidget(QFrame):
+    """Proje Medya Kütüphanesi (Media Pool)"""
+    media_selected = pyqtSignal(str) # file_path
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.manager = MediaManager()
+        self.setAcceptDrops(True)
+        self.init_ui()
+        
+    def init_ui(self):
+        self.setObjectName("media_pool")
+        self.setStyleSheet("""
+            #media_pool {
+                background-color: #121212;
+                border-top: 1px solid #2a2a2a;
+            }
+            QListWidget {
+                background-color: #1a1a1a;
+                border: 1px solid #2a2a2a;
+                border-radius: 6px;
+                outline: 0;
+            }
+            QListWidget::item {
+                color: #e0e0e0;
+                padding: 10px;
+                border-radius: 4px;
+            }
+            QListWidget::item:selected {
+                background-color: #00a8ff;
+                color: white;
+            }
+            QListWidget::item:hover {
+                background-color: #252525;
+            }
+        """)
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(15, 15, 15, 15)
+        
+        # Header
+        header_layout = QHBoxLayout()
+        title = QLabel("📁 Proje Medyası")
+        title.setStyleSheet("color: #ffffff; font-weight: bold; font-size: 16px; background: transparent;")
+        header_layout.addWidget(title)
+        header_layout.addStretch()
+        
+        add_btn = QPushButton("+ Medya Ekle")
+        add_btn.setStyleSheet("background-color: #2d2d2d; color: white; border-radius: 4px; padding: 5px 15px; font-weight: bold;")
+        add_btn.clicked.connect(self.browse_files)
+        header_layout.addWidget(add_btn)
+        layout.addLayout(header_layout)
+        
+        # List Widget
+        self.list_widget = QListWidget()
+        self.list_widget.setViewMode(QListWidget.ViewMode.IconMode)
+        self.list_widget.setIconSize(QSize(120, 90))
+        self.list_widget.setSpacing(10)
+        self.list_widget.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self.list_widget.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        self.list_widget.itemDoubleClicked.connect(self.on_item_double_clicked)
+        
+        layout.addWidget(self.list_widget)
+        
+    def browse_files(self):
+        files, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Medya Seç",
+            "",
+            "Medya Dosyaları (*.mp4 *.mov *.avi *.mkv *.mp3 *.wav *.aac);;Tüm Dosyalar (*)"
+        )
+        for f in files:
+            self.add_file(f)
+            
+    def add_file(self, file_path: str):
+        info = self.manager.add_media(file_path)
+        if info:
+            # Check if already added
+            for i in range(self.list_widget.count()):
+                if self.list_widget.item(i).data(Qt.ItemDataRole.UserRole) == file_path:
+                    return
+            
+            item = QListWidgetItem()
+            item.setText(info['name'])
+            item.setData(Qt.ItemDataRole.UserRole, info['path'])
+            item.setToolTip(f"{info['name']}\\nSüre: {info['duration']:.1f} sn")
+            
+            if info['thumbnail']:
+                # Scale thumbnail
+                scaled_pixmap = info['thumbnail'].scaled(120, 90, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
+                item.setIcon(QIcon(scaled_pixmap))
+            else:
+                # Placeholder for audio
+                pixmap = QPixmap(120, 90)
+                pixmap.fill(QColor("#2d2d2d"))
+                painter = QPainter(pixmap)
+                painter.setPen(QColor("#a0a0a0"))
+                font = painter.font()
+                font.setPointSize(24)
+                painter.setFont(font)
+                painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "🎵")
+                painter.end()
+                item.setIcon(QIcon(pixmap))
+                
+            self.list_widget.addItem(item)
+            
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            self.list_widget.setStyleSheet("background-color: #252525; border: 2px solid #00a8ff;")
+            
+    def dragLeaveEvent(self, event):
+        self.list_widget.setStyleSheet("background-color: #1a1a1a; border: 1px solid #2a2a2a;")
+        
+    def dropEvent(self, event):
+        self.list_widget.setStyleSheet("background-color: #1a1a1a; border: 1px solid #2a2a2a;")
+        urls = event.mimeData().urls()
+        for url in urls:
+            path = url.toLocalFile()
+            self.add_file(path)
+            
+    def on_item_double_clicked(self, item):
+        path = item.data(Qt.ItemDataRole.UserRole)
+        self.media_selected.emit(path)

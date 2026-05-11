@@ -3,6 +3,7 @@ Video Trimmer - Video kırpma
 """
 from pathlib import Path
 import subprocess
+import imageio_ffmpeg
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -33,8 +34,9 @@ class VideoTrimmer:
             # Alternatif: trim filter'ı kullan (daha güvenilir)
             duration = end_time - start_time
             
+            ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
             cmd = [
-                'ffmpeg',
+                ffmpeg_path,
                 '-i', str(input_video),
                 '-vf', f'trim=start={start_time}:end={end_time},setpts=PTS-STARTPTS',  # Video trim
                 '-af', f'atrim=start={start_time}:end={end_time},asetpts=PTS-STARTPTS',  # Audio trim
@@ -74,8 +76,9 @@ class VideoTrimmer:
             
             duration = end_time - start_time
             
+            ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
             cmd = [
-                'ffmpeg',
+                ffmpeg_path,
                 '-i', str(input_video),
                 '-vf', f'trim=start={start_time}:end={end_time},setpts=PTS-STARTPTS',  # Video trim
                 '-an',              # Audio kaldır (sessiz video)

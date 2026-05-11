@@ -2,10 +2,9 @@
 Audio Extractor - Ses çıkarma
 """
 from pathlib import Path
-from moviepy import VideoFileClip
-import soundfile as sf
+import subprocess
+import imageio_ffmpeg
 from utils.logger import setup_logger
-from utils.config import SAMPLE_RATE
 
 logger = setup_logger(__name__)
 
@@ -31,32 +30,44 @@ class AudioExtractor:
         try:
             logger.info(f"Ses çıkarılıyor: {video_path}")
             
-            video = VideoFileClip(video_path)
+            ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
             
-            if video.audio is None:
-                logger.warning("Video ses içermiyor!")
-                return False
+            cmd = [
+                ffmpeg_path,
+                '-i', str(video_path)
+            ]
             
-            # Ses zaman aralığını ayarla (MoviePy 2.x uyumlu)
-            audio = video.audio
-            if start_time or end_time:
-                end_time = end_time or video.duration
+            if start_time > 0:
+                cmd.extend(['-ss', str(start_time)])
+                
+            if end_time:
                 duration = end_time - start_time
-                # Audio'yu doğru zaman aralığında kés
-                audio = audio.time_transform(lambda t: t + start_time).with_duration(duration)
+                if duration > 0:
+                    cmd.extend(['-t', str(duration)])
+                    
+            cmd.extend([
+                '-vn',               # Video'yu yoksay
+                '-c:a', 'pcm_s16le', # WAV için standart codec
+                '-ar', '44100',      # Sample rate (Librosa'nın patlamaması için garanti)
+                '-y',                # Üzerine yaz
+                str(audio_output)
+            ])
             
-            # Ses dosyasını kaydet
-            audio.write_audiofile(
-                audio_output,
-                logger=None
-            )
+            # FFmpeg'i çalıştır
+            result = subprocess.run(cmd, capture_output=True, text=True)
             
-            video.close()
-            audio.close()
-            
+            if result.returncode != 0:
+                logger.error(f"FFmpeg ses çıkarma hatası: {result.stderr}")
+                return False
+                
+            # Dosyanın gerçekten oluştuğunu doğrula
+            if not Path(audio_output).exists():
+                logger.error("FFmpeg başarılı döndü ama dosya oluşturulamadı!")
+                return False
+                
             logger.info(f"Ses başarıyla çıkarıldı: {audio_output}")
             return True
-        
+            
         except Exception as e:
             logger.error(f"Ses çıkarılırken hata: {e}")
             return False

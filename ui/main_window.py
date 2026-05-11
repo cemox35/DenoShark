@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QSlider, QSpinBox, QDoubleSpinBox,
     QFileDialog, QProgressBar, QStackedWidget, QTableWidget,
     QTableWidgetItem, QGroupBox, QComboBox, QCheckBox, QFrame,
-    QSpacerItem, QSizePolicy
+    QSpacerItem, QSizePolicy, QSplitter
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize
 from PyQt6.QtGui import QFont, QIcon, QPixmap
@@ -21,7 +21,7 @@ from video_processor import (
     VideoHandler, VideoTrimmer, AudioExtractor,
     NoiseReducer, AudioMixer, VideoExporter
 )
-from .widgets import MediaFileDropper, AdvancedVideoTrimmer
+from .widgets import MediaPoolWidget, AdvancedVideoTrimmer
 
 logger = setup_logger(__name__)
 
@@ -265,7 +265,10 @@ class MainWindow(QMainWindow):
         version_label.setStyleSheet("color: #666666; padding-left: 20px;")
         sidebar_layout.addWidget(version_label)
         
-        # Content Area
+        # Workspace Splitter (Vertical)
+        self.workspace_splitter = QSplitter(Qt.Orientation.Vertical)
+        
+        # Upper part: Content Area (Tabs)
         self.content_area = QWidget()
         self.content_area.setObjectName("content_area")
         content_layout = QVBoxLayout(self.content_area)
@@ -273,9 +276,17 @@ class MainWindow(QMainWindow):
         
         self.stacked_widget = QStackedWidget()
         content_layout.addWidget(self.stacked_widget)
+        self.workspace_splitter.addWidget(self.content_area)
+        
+        # Lower part: Media Pool
+        self.media_pool = MediaPoolWidget()
+        self.media_pool.media_selected.connect(self.on_media_selected)
+        self.workspace_splitter.addWidget(self.media_pool)
+        
+        self.workspace_splitter.setSizes([700, 300])
         
         main_layout.addWidget(self.sidebar)
-        main_layout.addWidget(self.content_area)
+        main_layout.addWidget(self.workspace_splitter)
         
         # Add Pages
         self.stacked_widget.addWidget(self._create_video_tab())
@@ -316,20 +327,8 @@ class MainWindow(QMainWindow):
         title.setStyleSheet("color: #ffffff; margin-bottom: 10px;")
         layout.addWidget(title)
         
-        # Sürükle-bırak video yükleme
-        load_group = QGroupBox("1. Video Yükle")
-        load_layout = QVBoxLayout()
-        load_layout.setSpacing(15)
-        
-        self.drag_drop_widget = MediaFileDropper()
-        self.drag_drop_widget.file_dropped.connect(self.on_video_dropped)
-        load_layout.addWidget(self.drag_drop_widget)
-        
-        load_group.setLayout(load_layout)
-        layout.addWidget(load_group)
-        
         # Video kırpma (timeline preview ile)
-        trim_group = QGroupBox("2. Video Kırpma")
+        trim_group = QGroupBox("1. Video Kırpma")
         trim_layout = QVBoxLayout()
         trim_layout.setSpacing(15)
         
@@ -365,20 +364,7 @@ class MainWindow(QMainWindow):
         title.setStyleSheet("color: #ffffff; margin-bottom: 10px;")
         layout.addWidget(title)
         
-        # Video yükleme (Ses İşleme sekmesi için)
-        load_group_audio = QGroupBox("1. Video Yükle")
-        load_layout_audio = QVBoxLayout()
-        load_layout_audio.setSpacing(15)
-        
-        # Sürükle-bırak widget
-        self.drag_drop_audio = MediaFileDropper()
-        self.drag_drop_audio.file_dropped.connect(
-            lambda path: self.load_video_audio(path)
-        )
-        load_layout_audio.addWidget(self.drag_drop_audio)
-        
-        load_group_audio.setLayout(load_layout_audio)
-        layout.addWidget(load_group_audio)
+        # Ses İşlemleri Başlangıcı
         
         # Advanced Timeline and Preview widget
         self.audio_timeline_widget = AdvancedVideoTrimmer()
@@ -389,7 +375,7 @@ class MainWindow(QMainWindow):
         tools_layout.setSpacing(20)
         
         # Ses çıkarma
-        extract_group = QGroupBox("2. Ses İşlemleri")
+        extract_group = QGroupBox("1. Ses İşlemleri")
         extract_layout = QVBoxLayout()
         extract_layout.setSpacing(15)
         
@@ -413,7 +399,7 @@ class MainWindow(QMainWindow):
         # Gürültü azaltma
         right_tools_layout = QVBoxLayout()
         
-        denoise_group = QGroupBox("3. Gürültü Azaltma")
+        denoise_group = QGroupBox("2. Gürültü Azaltma")
         denoise_layout = QVBoxLayout()
         denoise_layout.setSpacing(15)
         
@@ -444,7 +430,7 @@ class MainWindow(QMainWindow):
         right_tools_layout.addWidget(denoise_group)
         
         # Ses karıştırma
-        mix_group = QGroupBox("4. Ses Ekleme")
+        mix_group = QGroupBox("3. Ses Ekleme")
         mix_layout = QVBoxLayout()
         mix_btn = QPushButton("🎵 Arka Plan Sesi Ekle (Yakında)")
         mix_btn.clicked.connect(self.mix_audio)
@@ -566,21 +552,15 @@ class MainWindow(QMainWindow):
         widget.setLayout(layout)
         return widget
     
-    def on_video_dropped(self, file_path: str):
-        """Sürükle-bırak ile video yüklendi"""
-        self.load_video_internal(file_path)
-    
-    def load_video(self):
-        """Video dosyası yükle (dialog ile)"""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Video Seç",
-            "",
-            "Video Dosyaları (*.mp4 *.mov *.avi *.mkv);;Tüm Dosyalar (*)"
-        )
-        
-        if file_path:
+    def on_media_selected(self, file_path: str):
+        """Media Pool'dan dosya seçildiğinde aktif sekmeye yükle"""
+        current_tab = self.stacked_widget.currentIndex()
+        if current_tab == 0: # Video İşleme
             self.load_video_internal(file_path)
+        elif current_tab == 1: # Ses İşleme
+            self.load_video_audio_internal(file_path)
+        else:
+            self.statusBar().showMessage("Medya eklemek için Video veya Ses İşleme sekmesine gidin.")
     
     def load_video_internal(self, file_path: str):
         """Video'yu iç olarak yükle"""
@@ -602,18 +582,7 @@ class MainWindow(QMainWindow):
             logger.error(f"Video yükleme hatası: {e}")
             self.statusBar().showMessage(f"❌ Hata: {str(e)[:50]}")
     
-    def load_video_audio(self, file_path: str = None):
-        """Ses işleme sekmesi için video yükle"""
-        if file_path is None:
-            file_path, _ = QFileDialog.getOpenFileName(
-                self,
-                "Video Seç",
-                "",
-                "Video Dosyaları (*.mp4 *.mov *.avi *.mkv);;Tüm Dosyalar (*)"
-            )
-        
-        if file_path:
-            self.load_video_audio_internal(file_path)
+    # load_video_audio removed as handled by Media Pool
     
     def load_video_audio_internal(self, file_path: str):
         """Ses işleme sekmesi için video'yu iç olarak yükle"""
