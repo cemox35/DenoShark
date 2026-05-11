@@ -102,8 +102,7 @@ class SpeechRecognizer:
             
             segments, info = self.model.transcribe(
                 audio_path,
-                language=language,
-                verbose=False
+                language=language
             )
             
             # Segments'i list'e dönüştür (lazy generator olduğundan)

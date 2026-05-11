@@ -1,7 +1,6 @@
 """
 TTS Engine - XTTS v2 ile metin-ses dönüştürme
 """
-import torch
 from pathlib import Path
 from utils.logger import setup_logger
 

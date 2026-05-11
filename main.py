@@ -9,6 +9,12 @@ import traceback
 import warnings
 from pathlib import Path
 
+# Windows DLL initialization for PyTorch MUST happen in the main thread
+try:
+    import torch
+except Exception as e:
+    pass
+
 # imageio_ffmpeg ve pkg_resources uyarılarını gizle
 warnings.filterwarnings("ignore", category=UserWarning, module="imageio_ffmpeg")
 warnings.filterwarnings("ignore", category=DeprecationWarning)
