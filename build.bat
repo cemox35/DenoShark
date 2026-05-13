@@ -2,14 +2,10 @@
 echo DenoShark PyInstaller Derleme Araci
 echo Lutfen bekleyin...
 
-REM Eger img klasorunde icon yoksa hata vermemesi icin parametre opsiyonel birakilmistir.
-REM Ekrana terminal cikmamasi icin --noconsole (veya --windowed) kullanilir.
-REM Auto-update sisteminin calismasi icin --onedir (klasor) yapisi kullanilir.
+REM Ekrana terminal cikmamasi icin --windowed kullanilir.
+REM Auto-update ve tasinabilir calisma icin --onedir (klasor) yapisi kullanilir.
 
-pyinstaller --noconfirm --onedir --windowed ^
-  --name "DenoShark" ^
-  --add-data "img;img" ^
-  "main.py"
+pyinstaller --noconfirm --clean --windowed --onedir DenoShark.spec
 
 echo.
 echo Derleme tamamlandi!

@@ -1,11 +1,33 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from pathlib import Path
+from PyInstaller.building.build_main import Tree
+from PyInstaller.utils.hooks import collect_data_files
+
+project_root = Path(__file__).parent
+
+datas = [Tree(str(project_root / "img"), prefix="img")]
+
+if (project_root / "models").exists():
+    datas.append(Tree(str(project_root / "models"), prefix="models"))
+
+if (project_root / "pretrained_models").exists():
+    datas.append(Tree(str(project_root / "pretrained_models"), prefix="pretrained_models"))
+
+try:
+    imageio_ffmpeg_datas = collect_data_files(
+        "imageio_ffmpeg",
+        includes=["**/binaries/*", "**/binaries/**/*"]
+    )
+    datas.extend(imageio_ffmpeg_datas)
+except Exception:
+    pass
 
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('img', 'img')],
+    datas=datas,
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
