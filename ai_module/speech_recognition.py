@@ -43,10 +43,11 @@ class SpeechRecognizer:
             raise ModuleNotFoundError(msg)
 
         # Allow automatic device selection: prefer CUDA when available, otherwise CPU.
+        # Uses ctranslate2 directly — no torch import needed for this check.
         if device == "auto":
             try:
-                import torch
-                device = "cuda" if torch.cuda.is_available() else "cpu"
+                import ctranslate2
+                device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
             except Exception:
                 device = "cpu"
 

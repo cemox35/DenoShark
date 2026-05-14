@@ -3,7 +3,6 @@
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files
 
-# __file__ is not defined in some PyInstaller spec execution contexts.
 project_root = Path.cwd()
 
 datas = [(str(project_root / "img"), "img")]
@@ -23,6 +22,55 @@ try:
 except Exception:
     pass
 
+# Modules not used at runtime — excluding them prevents PyInstaller from
+# bundling large optional dependencies (numba/llvmlite alone = ~100 MB).
+EXCLUDES = [
+    # numba JIT acceleration for librosa — optional, falls back to numpy
+    "numba",
+    "llvmlite",
+    # CUDA layers — CPU inference is used via ctranslate2
+    "torch.cuda",
+    "torch.backends.cudnn",
+    "torch.distributed",
+    "torch.ao",
+    "torch.onnx",
+    "torch.testing",
+    "torch.profiler",
+    # ML libs not used in this project
+    "sklearn",
+    "skimage",
+    "onnxruntime",
+    # tkinter not used — app uses PyQt6
+    "tkinter",
+    "_tkinter",
+    "tcl",
+    "tk",
+    # matplotlib not used at runtime
+    "matplotlib",
+    # Development / testing tools — never needed in a packaged app
+    "IPython",
+    "ipykernel",
+    "jupyter",
+    "notebook",
+    "pytest",
+    "unittest",
+    "doctest",
+    "pydoc",
+    "pdb",
+    # Unused standard-library heavyweights
+    "xml.etree",
+    "xmlrpc",
+    "ftplib",
+    "imaplib",
+    "smtplib",
+    "telnetlib",
+    "email",
+    "html",
+    "http.server",
+    "turtle",
+    "curses",
+]
+
 a = Analysis(
     ['main.py'],
     pathex=[],
@@ -32,9 +80,9 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=EXCLUDES,
     noarchive=False,
-    optimize=0,
+    optimize=1,  # Remove assert statements and docstrings from .pyc files
 )
 pyz = PYZ(a.pure)
 
@@ -61,6 +109,12 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=True,
-    upx_exclude=[],
+    # These DLLs can silently break when UPX-compressed on Windows
+    upx_exclude=[
+        "vcruntime140.dll",
+        "msvcp140.dll",
+        "python3*.dll",
+        "api-ms-win-*.dll",
+    ],
     name='DenoShark',
 )

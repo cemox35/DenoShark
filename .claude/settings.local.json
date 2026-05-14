@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-ChildItem -Path \"z:\\\\Projeler\\\\DenoShark\\\\dist\\\\DenoShark\\\\_internal\" -ErrorAction SilentlyContinue | Sort-Object Length -Descending | Select-Object -First 30 | ForEach-Object { \"{0,8:N1} MB  {1}\" -f \\($_.Length/1MB\\), $_.Name })",
+      "PowerShell(Get-ChildItem -Path \"z:\\\\Projeler\\\\DenoShark\\\\dist\\\\DenoShark\\\\_internal\" -Directory | ForEach-Object { $size = \\(Get-ChildItem $_.FullName -Recurse -File | Measure-Object -Property Length -Sum\\).Sum; [PSCustomObject]@{Name=$_.Name; SizeMB=[math]::Round\\($size/1MB,1\\)} } | Sort-Object SizeMB -Descending | Select-Object -First 20 | Format-Table -AutoSize)",
+      "PowerShell($total = \\(Get-ChildItem -Path \"z:\\\\Projeler\\\\DenoShark\\\\dist\" -Recurse -File | Measure-Object -Property Length -Sum\\).Sum; \"Toplam dist boyutu: {0:N1} MB\" -f \\($total/1MB\\))"
+    ]
+  }
+}

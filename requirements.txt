@@ -3,7 +3,8 @@ PyQt6==6.6.1
 PyQt6-Qt6==6.6.1
 
 # Video Processing
-opencv-python==4.8.1.78
+# opencv-python-headless has no Qt/GTK GUI modules — saves ~15-20 MB in dist
+opencv-python-headless==4.8.1.78
 moviepy==2.2.1
 imageio==2.34.0
 imageio-ffmpeg==0.4.9
@@ -16,6 +17,8 @@ numpy==1.26.0
 
 # AI Models (En son sürümleri, Python 3.12 uyumlu)
 openai-whisper>=20240930
+# CPU-only torch: ~50 MB vs ~300 MB for CUDA build.
+# Install with: pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 torch>=2.0.0
 torchaudio>=2.0.0
 
