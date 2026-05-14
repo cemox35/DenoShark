@@ -28,14 +28,12 @@ EXCLUDES = [
     # numba JIT acceleration for librosa — optional, falls back to numpy
     "numba",
     "llvmlite",
-    # CUDA layers — CPU inference is used via ctranslate2
-    "torch.cuda",
-    "torch.backends.cudnn",
-    "torch.distributed",
-    "torch.ao",
-    "torch.onnx",
-    "torch.testing",
-    "torch.profiler",
+    # torch / torchaudio — not needed at runtime:
+    #   faster-whisper uses ctranslate2 directly (no torch dependency)
+    #   TTS/XTTS (tts_engine.py) is optional and handles ImportError gracefully
+    "torch",
+    "torchaudio",
+    "torchvision",
     # ML libs not used in this project
     "sklearn",
     "skimage",
@@ -57,18 +55,11 @@ EXCLUDES = [
     "doctest",
     "pydoc",
     "pdb",
-    # Unused standard-library heavyweights
-    "xml.etree",
-    "xmlrpc",
-    "ftplib",
-    "imaplib",
-    "smtplib",
-    "telnetlib",
-    "email",
-    "html",
-    "http.server",
+    # Unused standard-library heavyweights (only truly safe ones)
     "turtle",
     "curses",
+    "ftplib",
+    "telnetlib",
 ]
 
 a = Analysis(
