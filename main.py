@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtGui import QIcon
 from ui import MainWindow
 from utils.logger import logger
+from utils.config import resource_path
 
 def global_exception_handler(exc_type, exc_value, exc_traceback):
     """Tüm yakalanmayan hataları yakalayan global hata yöneticisi (Global Exception Handler)"""
@@ -55,8 +56,8 @@ def register_win_extension():
         import ctypes
         from PyQt6.QtGui import QImage
         
-        icon_path = os.path.abspath(r"img\logo-small.ico")
-        png_path = os.path.abspath(r"img\logo-small.png")
+        icon_path = str(resource_path("img/logo-small.ico"))
+        png_path = str(resource_path("img/logo-small.png"))
         
         # Windows ikon formatı için .ico gerekir, eğer yoksa png'den çevir
         if not os.path.exists(icon_path) and os.path.exists(png_path):
@@ -104,7 +105,7 @@ def main():
     app = QApplication(sys.argv)
     
     # Uygulama ikonunu ayarla
-    icon_path = Path("img/logo-small.png")
+    icon_path = resource_path("img/logo-small.png")
     if icon_path.exists():
         app.setWindowIcon(QIcon(str(icon_path)))
         

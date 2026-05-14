@@ -15,7 +15,7 @@ from PyQt6.QtGui import QFont, QIcon, QPixmap, QAction, QKeySequence
 
 from utils.logger import setup_logger
 from utils.config import (
-    WINDOW_WIDTH, WINDOW_HEIGHT, APP_NAME, APP_VERSION, TEMP_DIR
+    WINDOW_WIDTH, WINDOW_HEIGHT, APP_NAME, APP_VERSION, TEMP_DIR, resource_path
 )
 from utils.project_manager import ProjectManager
 from utils.updater import check_for_updates, download_file_from_google_drive, apply_update_and_restart
@@ -253,7 +253,7 @@ class WhisperWorker(QThread):
     """faster-whisper transkripsiyon worker (non-blocking)"""
     status_changed = pyqtSignal(str)  # Durum mesajı
     progress = pyqtSignal(int)  # 0-100 ilerleme
-    finished = pyqtSignal(bool, str)  # Başarılı, Dosya yolu
+    finished = pyqtSignal(bool, str, str)  # Başarılı, Dosya yolu, Hata mesajı
     
     def __init__(self, audio_path: str, output_srt: str, model_size: str = "base", language: str = None):
         super().__init__()
@@ -263,36 +263,39 @@ class WhisperWorker(QThread):
         self.language = language
         
     def run(self):
+        import traceback
         try:
             from ai_module.speech_recognition import SpeechRecognizer
-            
+
             self.status_changed.emit(f"📥 Model yükleniyor ({self.model_size})...")
             self.progress.emit(10)
-            
+
             recognizer = SpeechRecognizer(model_name=self.model_size)
-            
+
             self.status_changed.emit(f"🎤 Transkripsiyon başlatılıyor...")
             self.progress.emit(30)
-            
+
             success = recognizer.save_srt(
                 self.audio_path,
                 self.output_srt,
                 language=self.language
             )
-            
+
             if success:
                 self.progress.emit(100)
                 self.status_changed.emit(f"✅ Altyazılar başarıyla oluşturuldu!")
                 self.status_changed.emit(f"📁 Dosya: {self.output_srt}")
-                self.finished.emit(True, self.output_srt)
+                self.finished.emit(True, self.output_srt, "")
             else:
                 self.status_changed.emit(f"❌ Transkripsiyon başarısız oldu.")
-                self.finished.emit(False, "")
-                
+                self.finished.emit(False, "", "Transkripsiyon başarısız. Ses dosyasını kontrol edin.")
+
         except Exception as e:
-            logger.error(f"WhisperWorker hatası: {e}")
+            tb = traceback.format_exc()
+            logger.error(f"WhisperWorker hatası: {e}\n{tb}")
+            error_msg = f"{type(e).__name__}: {str(e)}\n\n{tb}"
             self.status_changed.emit(f"❌ Hata: {str(e)}")
-            self.finished.emit(False, "")
+            self.finished.emit(False, "", error_msg)
 
 class ExportWorker(QThread):
     """Video export ve altyazı gömme işlemleri thread'i"""
@@ -628,11 +631,12 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
         
         # Pencere ikonu ayarla
-        icon_path = Path("img/logo-small.png")
+        icon_path = resource_path("img/logo-small.png")
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
             
         self.setGeometry(100, 100, WINDOW_WIDTH, WINDOW_HEIGHT)
+        self.setMinimumSize(800, 560)
         self.setStyleSheet(PREMIUM_DARK_THEME)
         
         # Ana widget
@@ -647,14 +651,15 @@ class MainWindow(QMainWindow):
         # Sidebar
         self.sidebar = QFrame()
         self.sidebar.setObjectName("sidebar")
-        self.sidebar.setFixedWidth(260)
+        self.sidebar.setMinimumWidth(180)
+        self.sidebar.setMaximumWidth(280)
         sidebar_layout = QVBoxLayout(self.sidebar)
         sidebar_layout.setContentsMargins(0, 30, 0, 20)
         sidebar_layout.setSpacing(5)
         
         # App Title / Logo in Sidebar
         logo_label = QLabel()
-        logo_path = Path("img/logo.png")
+        logo_path = resource_path("img/logo.png")
         if logo_path.exists():
             pixmap = QPixmap(str(logo_path))
             scaled_pixmap = pixmap.scaledToHeight(125, Qt.TransformationMode.SmoothTransformation)
@@ -704,7 +709,7 @@ class MainWindow(QMainWindow):
         self.content_area = QWidget()
         self.content_area.setObjectName("content_area")
         content_layout = QVBoxLayout(self.content_area)
-        content_layout.setContentsMargins(40, 40, 40, 40)
+        content_layout.setContentsMargins(20, 20, 20, 20)
         
         self.stacked_widget = QStackedWidget()
         content_layout.addWidget(self.stacked_widget)
@@ -714,7 +719,7 @@ class MainWindow(QMainWindow):
         self.main_splitter.setStretchFactor(0, 0) # Sidebar fixed
         self.main_splitter.setStretchFactor(1, 1) # Media Pool stretches slightly
         self.main_splitter.setStretchFactor(2, 4) # Workspace gets max stretch
-        self.main_splitter.setSizes([260, 300, 1000])
+        self.main_splitter.setSizes([220, 260, 900])
         
         main_layout.addWidget(self.main_splitter)
         
@@ -747,6 +752,21 @@ class MainWindow(QMainWindow):
                 btn.setChecked(True)
             else:
                 btn.setChecked(False)
+
+    def _on_media_error(self, error, error_string: str):
+        from PyQt6.QtMultimedia import QMediaPlayer
+        if error == QMediaPlayer.Error.NoError:
+            return
+        logger.error(f"Medya oynatıcı hatası: {error_string}")
+        QMessageBox.warning(
+            self,
+            "Medya Oynatıcı Hatası",
+            f"Video/ses oynatılırken bir hata oluştu:\n\n{error_string}\n\n"
+            "Olası nedenler:\n"
+            "• Video formatı desteklenmiyor\n"
+            "• Windows Media bileşeni eksik\n"
+            "• Dosya bozuk veya erişilemiyor"
+        )
     
     def _create_video_tab(self):
         """Video işleme sekmesi"""
@@ -766,6 +786,7 @@ class MainWindow(QMainWindow):
         
         # Advanced Timeline and Preview widget
         self.timeline_widget = AdvancedVideoTrimmer()
+        self.timeline_widget.media_player.errorOccurred.connect(self._on_media_error)
         trim_layout.addWidget(self.timeline_widget)
         
         trim_btn = QPushButton("✂️ Video Kırp")
@@ -1227,13 +1248,13 @@ class MainWindow(QMainWindow):
         """İlerleme güncellemesi"""
         self.whisper_progress.setValue(value)
     
-    def _on_whisper_finished(self, success: bool, output_path: str):
+    def _on_whisper_finished(self, success: bool, output_path: str, error_msg: str):
         """Whisper worker tamamlandı"""
-        # UI'yi etkinleştir
         self.btn_generate_subtitles.setEnabled(True)
         self.whisper_model_combo.setEnabled(True)
         self.whisper_lang_combo.setEnabled(True)
-        
+        self.whisper_progress.setVisible(False)
+
         if success:
             self.statusBar().showMessage(f"✅ Altyazılar başarıyla oluşturuldu: {Path(output_path).name}", 5000)
             self.whisper_console.append(f"\n✅ Altyazılar başarıyla kaydedildi!")
@@ -1245,6 +1266,14 @@ class MainWindow(QMainWindow):
         else:
             self.statusBar().showMessage("❌ Altyazı oluşturma başarısız oldu.", 5000)
             self.whisper_console.append(f"\n❌ Altyazı oluşturma başarısız!")
+            err_box = QMessageBox(self)
+            err_box.setIcon(QMessageBox.Icon.Critical)
+            err_box.setWindowTitle("Whisper Hatası")
+            err_box.setText("Altyazı oluşturma işlemi başarısız oldu.")
+            if error_msg:
+                err_box.setInformativeText("Detaylar için 'Show Details' butonuna tıklayın.")
+                err_box.setDetailedText(error_msg)
+            err_box.exec()
     
     def _create_settings_tab(self):
         """Ayarlar sekmesi"""

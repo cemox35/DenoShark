@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 from pathlib import Path
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 
 project_root = Path.cwd()
 
@@ -19,6 +19,17 @@ try:
         includes=["**/binaries/*", "**/binaries/**/*"]
     )
     datas.extend(imageio_ffmpeg_datas)
+except Exception:
+    pass
+
+# faster-whisper model cache ve veri dosyaları
+try:
+    datas.extend(collect_data_files("faster_whisper"))
+except Exception:
+    pass
+
+try:
+    datas.extend(collect_data_files("ctranslate2"))
 except Exception:
     pass
 
@@ -67,7 +78,18 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=datas,
-    hiddenimports=[],
+    hiddenimports=[
+        'ctranslate2',
+        'faster_whisper',
+        'faster_whisper.transcribe',
+        'faster_whisper.audio',
+        'faster_whisper.tokenizer',
+        'faster_whisper.utils',
+        'sentencepiece',
+        'huggingface_hub',
+        'huggingface_hub.utils',
+        'tokenizers',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -93,6 +115,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=str(project_root / "img" / "logo-small.ico"),
 )
 coll = COLLECT(
     exe,

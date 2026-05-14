@@ -2,16 +2,39 @@
 DenoShark Configuration Module
 Tüm ayarlar burada yönetilir
 """
+import sys
 import os
 from pathlib import Path
 
-# Proje kök dizini
-PROJECT_ROOT = Path(__file__).parent.parent
+# PyInstaller dist'ten mi çalışıyoruz?
+_IS_FROZEN = hasattr(sys, '_MEIPASS')
+
+# Bundled resource'lar (img, models) _MEIPASS içinde; user data exe'nin yanında
+_MEIPASS_ROOT = Path(sys._MEIPASS) if _IS_FROZEN else None
+_EXE_DIR = Path(sys.executable).parent if _IS_FROZEN else None
+
+# Proje kök dizini (dev modda kaynak ağacı, dist modda _MEIPASS)
+PROJECT_ROOT = _MEIPASS_ROOT if _IS_FROZEN else Path(__file__).parent.parent
+
+
+def resource_path(relative: str) -> Path:
+    """Bundled kaynaklara (img, models) giden yol — dev ve dist'te çalışır."""
+    if _IS_FROZEN:
+        return _MEIPASS_ROOT / relative
+    return PROJECT_ROOT / relative
+
+
+def user_data_path(relative: str) -> Path:
+    """Kullanıcı tarafından yazılabilir dizinler (temp, output) — exe'nin yanı."""
+    if _IS_FROZEN:
+        return _EXE_DIR / relative
+    return PROJECT_ROOT / relative
+
 
 # Dizinler
-TEMP_DIR = PROJECT_ROOT / "temp"
-OUTPUT_DIR = PROJECT_ROOT / "output"
-MODELS_DIR = PROJECT_ROOT / "models"
+TEMP_DIR = user_data_path("temp")
+OUTPUT_DIR = user_data_path("output")
+MODELS_DIR = user_data_path("models")
 
 # Klasörleri oluştur
 TEMP_DIR.mkdir(exist_ok=True)

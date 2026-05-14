@@ -2,11 +2,11 @@
 Custom Widgets - Özel PyQt6 bileşenleri
 """
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider, 
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider,
     QSpinBox, QFrame, QFileDialog, QPushButton, QDoubleSpinBox,
     QListWidget, QListWidgetItem, QLineEdit, QGraphicsView,
     QGraphicsScene, QGraphicsRectItem, QGraphicsLineItem, QGraphicsTextItem,
-    QGraphicsPolygonItem, QMenu
+    QGraphicsPolygonItem, QMenu, QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QMimeData, QRect, QPoint, QPointF, QSize, QUrl, QRectF, QObject, QTimer
 from PyQt6.QtGui import QPixmap, QImage, QDrag, QPainter, QColor, QBrush, QPen, QPalette, QIcon, QFont, QLinearGradient, QPolygonF, QUndoStack, QUndoCommand, QAction
@@ -226,7 +226,8 @@ class AdvancedVideoTrimmer(QWidget):
         # Video Player Area
         self.video_container = QFrame()
         self.video_container.setStyleSheet("background-color: #000000; border-radius: 8px; border: 1px solid #2a2a2a;")
-        self.video_container.setMinimumHeight(350)
+        self.video_container.setMinimumHeight(200)
+        self.video_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         video_layout = QVBoxLayout(self.video_container)
         video_layout.setContentsMargins(2, 2, 2, 2)
         
