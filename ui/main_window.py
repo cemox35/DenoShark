@@ -250,52 +250,116 @@ class DenoiseWorker(QThread):
         self.finished.emit(result)
 
 class WhisperWorker(QThread):
-    """faster-whisper transkripsiyon worker (non-blocking)"""
-    status_changed = pyqtSignal(str)  # Durum mesajı
-    progress = pyqtSignal(int)  # 0-100 ilerleme
-    finished = pyqtSignal(bool, str, str)  # Başarılı, Dosya yolu, Hata mesajı
-    
+    """
+    faster-whisper transkripsiyon worker.
+
+    Bu exe'yi `--whisper-worker` bayrağıyla subprocess olarak başlatır.
+    Çocuk process PyQt / UI yüklemez; yalnızca Whisper çalışır.
+    ctranslate2 native crash yaparsa sadece o process ölür, ana uygulama
+    hayatta kalır ve stderr'den alınan hata popup olarak gösterilir.
+    """
+    status_changed = pyqtSignal(str)
+    progress = pyqtSignal(int)
+    finished = pyqtSignal(bool, str, str)  # success, output_path, error_msg
+
     def __init__(self, audio_path: str, output_srt: str, model_size: str = "base", language: str = None):
         super().__init__()
         self.audio_path = audio_path
         self.output_srt = output_srt
         self.model_size = model_size
         self.language = language
-        
+        self._proc = None
+
     def run(self):
-        import traceback
+        import subprocess
+        import json
+
+        cmd = [
+            sys.executable,
+            "--whisper-worker",
+            self.audio_path,
+            self.output_srt,
+            self.model_size,
+            str(self.language) if self.language else "None",
+        ]
+
         try:
-            from ai_module.speech_recognition import SpeechRecognizer
-
-            self.status_changed.emit(f"📥 Model yükleniyor ({self.model_size})...")
-            self.progress.emit(10)
-
-            recognizer = SpeechRecognizer(model_name=self.model_size)
-
-            self.status_changed.emit(f"🎤 Transkripsiyon başlatılıyor...")
-            self.progress.emit(30)
-
-            success = recognizer.save_srt(
-                self.audio_path,
-                self.output_srt,
-                language=self.language
+            self._proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
             )
-
-            if success:
-                self.progress.emit(100)
-                self.status_changed.emit(f"✅ Altyazılar başarıyla oluşturuldu!")
-                self.status_changed.emit(f"📁 Dosya: {self.output_srt}")
-                self.finished.emit(True, self.output_srt, "")
-            else:
-                self.status_changed.emit(f"❌ Transkripsiyon başarısız oldu.")
-                self.finished.emit(False, "", "Transkripsiyon başarısız. Ses dosyasını kontrol edin.")
-
         except Exception as e:
-            tb = traceback.format_exc()
-            logger.error(f"WhisperWorker hatası: {e}\n{tb}")
-            error_msg = f"{type(e).__name__}: {str(e)}\n\n{tb}"
-            self.status_changed.emit(f"❌ Hata: {str(e)}")
-            self.finished.emit(False, "", error_msg)
+            import traceback
+            self.finished.emit(False, "", f"Subprocess başlatılamadı:\n{traceback.format_exc()}")
+            return
+
+        error_msg = ""
+        success = False
+
+        # stdout'tan gerçek zamanlı JSON ilerleme mesajları oku
+        for raw_line in self._proc.stdout:
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                msg = json.loads(line)
+                msg_type = msg.get("type", "")
+                value = msg.get("value")
+
+                if msg_type == "progress":
+                    self.progress.emit(int(value))
+                elif msg_type == "status":
+                    self.status_changed.emit(str(value))
+                elif msg_type == "error":
+                    error_msg = str(value)
+                    logger.error(f"Whisper worker hatası:\n{error_msg}")
+                    self.status_changed.emit(f"❌ Hata: {str(value)[:120]}")
+                elif msg_type == "done":
+                    success = bool(value)
+            except json.JSONDecodeError:
+                # JSON dışı satır (ctranslate2 uyarısı vb.) — yoksay
+                logger.debug(f"Whisper worker stdout (non-JSON): {line[:200]}")
+
+        stderr_output = self._proc.stderr.read()
+        self._proc.wait()
+        rc = self._proc.returncode
+        self._proc = None
+
+        if success:
+            self.finished.emit(True, self.output_srt, "")
+            return
+
+        # Başarısız — anlamlı hata mesajı oluştur
+        if not error_msg:
+            if rc != 0:
+                error_msg = (
+                    f"Whisper process beklenmedik şekilde kapandı "
+                    f"(exit code: {rc}).\n\n"
+                )
+                if stderr_output.strip():
+                    error_msg += f"Detay:\n{stderr_output[:800]}"
+                else:
+                    error_msg += (
+                        "Olası nedenler:\n"
+                        "  • ctranslate2.dll yüklenemiyor\n"
+                        "  • Yetersiz RAM\n"
+                        "  • Antivirus engeli\n"
+                    )
+            else:
+                error_msg = "Transkripsiyon başarısız oldu."
+
+        self.finished.emit(False, "", error_msg)
+
+    def stop(self):
+        if self._proc is not None:
+            try:
+                self._proc.terminate()
+            except Exception:
+                pass
 
 class ExportWorker(QThread):
     """Video export ve altyazı gömme işlemleri thread'i"""

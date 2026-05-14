@@ -6,8 +6,12 @@ import sys
 from pathlib import Path
 from datetime import datetime
 
-# Log dizini
-LOG_DIR = Path(__file__).parent.parent / "logs"
+# Dist (PyInstaller frozen) modunda exe'nin yanına yaz; dev'de proje kökü
+if hasattr(sys, '_MEIPASS'):
+    LOG_DIR = Path(sys.executable).parent / "logs"
+else:
+    LOG_DIR = Path(__file__).parent.parent / "logs"
+
 LOG_DIR.mkdir(exist_ok=True)
 
 def setup_logger(name: str) -> logging.Logger:

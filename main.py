@@ -5,14 +5,25 @@ DenoShark - Nişanlı için Video Düzenleme Uygulaması
 Ana giriş noktası
 """
 import sys
+
+# ── Whisper subprocess worker modu ────────────────────────────────────────
+# WhisperWorker bu exe'yi `--whisper-worker` bayrağıyla başlatır.
+# PyQt6 / UI hiç yüklenmeden sadece Whisper çalışır; crash olursa
+# sadece bu process ölür, ana uygulama etkilenmez.
+if "--whisper-worker" in sys.argv:
+    idx = sys.argv.index("--whisper-worker")
+    from utils.whisper_runner import run_worker_main
+    run_worker_main(sys.argv[idx + 1:])
+    sys.exit(0)
+# ──────────────────────────────────────────────────────────────────────────
+
 import traceback
 import warnings
 from pathlib import Path
 
-# Windows DLL initialization for PyTorch MUST happen in the main thread
 try:
     import torch
-except Exception as e:
+except Exception:
     pass
 
 # imageio_ffmpeg ve pkg_resources uyarılarını gizle
