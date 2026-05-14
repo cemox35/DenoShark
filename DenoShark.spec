@@ -1,18 +1,18 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 from pathlib import Path
-from PyInstaller.building.build_main import Tree
 from PyInstaller.utils.hooks import collect_data_files
 
-project_root = Path(__file__).parent
+# __file__ is not defined in some PyInstaller spec execution contexts.
+project_root = Path.cwd()
 
-datas = [Tree(str(project_root / "img"), prefix="img")]
+datas = [(str(project_root / "img"), "img")]
 
 if (project_root / "models").exists():
-    datas.append(Tree(str(project_root / "models"), prefix="models"))
+    datas.append((str(project_root / "models"), "models"))
 
 if (project_root / "pretrained_models").exists():
-    datas.append(Tree(str(project_root / "pretrained_models"), prefix="pretrained_models"))
+    datas.append((str(project_root / "pretrained_models"), "pretrained_models"))
 
 try:
     imageio_ffmpeg_datas = collect_data_files(

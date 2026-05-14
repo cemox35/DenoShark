@@ -2,10 +2,9 @@
 echo DenoShark PyInstaller Derleme Araci
 echo Lutfen bekleyin...
 
-REM Ekrana terminal cikmamasi icin --windowed kullanilir.
-REM Auto-update ve tasinabilir calisma icin --onedir (klasor) yapisi kullanilir.
+REM .spec dosyasi kullanilirken --onedir/--windowed gibi makespec opsiyonlari verilmez.
 
-pyinstaller --noconfirm --clean --windowed --onedir DenoShark.spec
+pyinstaller --noconfirm --clean DenoShark.spec
 
 echo.
 echo Derleme tamamlandi!
