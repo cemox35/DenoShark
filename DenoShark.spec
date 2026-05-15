@@ -1,9 +1,33 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import sys
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 
 project_root = Path.cwd()
+
+# Qt6 Multimedia backend DLL'lerini bul ve binaries listesine ekle.
+# QMediaPlayer Windows'ta windowsmediafoundation plugin'ine ihtiyaç duyar;
+# PyInstaller bunu otomatik toplamaz, diğer PC'lerde ses çalışmaz.
+def _collect_qt6_multimedia():
+    result = []
+    site_packages = Path(sys.prefix) / "Lib" / "site-packages"
+    qt6_root = site_packages / "PyQt6" / "Qt6"
+
+    # Backend plugin: PyQt6/Qt6/plugins/multimedia/
+    mm_plugins = qt6_root / "plugins" / "multimedia"
+    if mm_plugins.exists():
+        for dll in mm_plugins.glob("*.dll"):
+            result.append((str(dll), "PyQt6/Qt6/plugins/multimedia"))
+
+    # Çekirdek Multimedia DLL'leri (Qt6/bin/)
+    qt6_bin = qt6_root / "bin"
+    for name in ["Qt6Multimedia.dll", "Qt6MultimediaWidgets.dll", "Qt6Network.dll"]:
+        dll = qt6_bin / name
+        if dll.exists():
+            result.append((str(dll), "PyQt6/Qt6/bin"))
+
+    return result
 
 # ── Data files ─────────────────────────────────────────────────────────────
 datas = [(str(project_root / "img"), "img")]
@@ -42,7 +66,7 @@ except Exception:
 # Doğru yaklaşım: DLL'leri auto-detection'a bırakmak (_internal/ctranslate2/),
 # pyi_rth_ctranslate2 runtime hook ile doğru sırada yüklemek.
 # cudnn64_9.dll CPU-only modda gerekli değil; COLLECT adımında filtreleniyor.
-binaries = []
+binaries = _collect_qt6_multimedia()
 
 # UPX, native DLL'leri ve .pyd extension'larını bozabilir
 UPX_EXCLUDE = [

@@ -32,6 +32,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtGui import QIcon
+from PyQt6.QtCore import Qt
 from ui import MainWindow
 from utils.logger import logger
 from utils.config import resource_path
@@ -113,6 +114,9 @@ def main():
     except Exception:
         pass
     
+    QApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+    )
     app = QApplication(sys.argv)
     
     # Uygulama ikonunu ayarla

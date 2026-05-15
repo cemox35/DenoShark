@@ -4,13 +4,14 @@ Main Window - Ana arayüz
 import sys
 from pathlib import Path
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QSlider, QSpinBox, QDoubleSpinBox,
     QFileDialog, QProgressBar, QStackedWidget, QTableWidget,
     QTableWidgetItem, QGroupBox, QComboBox, QCheckBox, QFrame,
-    QSpacerItem, QSizePolicy, QSplitter, QMessageBox, QTextEdit
+    QSpacerItem, QSizePolicy, QSplitter, QMessageBox, QTextEdit,
+    QScrollArea
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize, QTimer
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize, QTimer, QVariantAnimation, QEasingCurve
 from PyQt6.QtGui import QFont, QIcon, QPixmap, QAction, QKeySequence
 
 from utils.logger import setup_logger
@@ -52,11 +53,12 @@ QWidget {
     background-color: transparent;
     color: #a0a0a0;
     text-align: left;
-    padding: 14px 20px;
+    padding: 10px 12px;
     border: none;
     border-radius: 8px;
-    font-size: 15px;
-    margin: 4px 12px;
+    font-size: 13px;
+    margin: 3px 8px;
+    min-height: 32px;
 }
 
 #sidebar QPushButton:hover {
@@ -66,12 +68,39 @@ QWidget {
 
 #sidebar QPushButton:checked {
     background-color: #292929;
-    color: #00a8ff; /* Accent color */
+    color: #00a8ff;
     font-weight: bold;
     border-left: 4px solid #00a8ff;
     border-top-left-radius: 4px;
     border-bottom-left-radius: 4px;
 }
+
+/* Sidebar toggle (hamburger) butonu */
+#sidebar_toggle {
+    background-color: transparent;
+    color: #888888;
+    border: none;
+    border-radius: 6px;
+    font-size: 18px;
+    padding: 6px;
+    margin: 4px 8px 0px 8px;
+    text-align: center;
+}
+#sidebar_toggle:hover {
+    background-color: #242424;
+    color: #ffffff;
+}
+
+/* Media pool toggle butonu */
+#media_toggle_btn {
+    background: transparent;
+    color: #555;
+    border: none;
+    font-size: 14px;
+    padding: 4px 6px;
+    border-radius: 4px;
+}
+#media_toggle_btn:hover { color: #00a8ff; background: #242424; }
 
 /* Content Area */
 #content_area {
@@ -82,12 +111,12 @@ QWidget {
 QGroupBox {
     border: 1px solid #2a2a2a;
     border-radius: 8px;
-    margin-top: 25px;
-    padding-top: 15px;
+    margin-top: 16px;
+    padding-top: 10px;
     font-weight: bold;
     color: #ffffff;
     background-color: #1a1a1a;
-    font-size: 14px;
+    font-size: 13px;
 }
 
 QGroupBox::title {
@@ -194,6 +223,47 @@ QCheckBox::indicator:hover {
 QCheckBox::indicator:checked {
     background-color: #00a8ff;
     border: 1px solid #00a8ff;
+}
+
+/* Araç paneli tab bar */
+#audio_tab_bar {
+    background-color: #181818;
+    border-top: 1px solid #262626;
+}
+#tools_container {
+    background-color: #181818;
+    border-top: 1px solid #262626;
+}
+
+/* Scroll Area */
+QScrollArea {
+    border: none;
+    background: transparent;
+}
+QScrollArea > QWidget > QWidget {
+    background: transparent;
+}
+
+/* Scrollbar */
+QScrollBar:vertical {
+    background: #181818;
+    width: 6px;
+    border-radius: 3px;
+    margin: 0;
+}
+QScrollBar::handle:vertical {
+    background: #333333;
+    border-radius: 3px;
+    min-height: 24px;
+}
+QScrollBar::handle:vertical:hover {
+    background: #00a8ff;
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+QScrollBar:horizontal {
+    height: 0px;
 }
 
 /* Progress Bar */
@@ -366,37 +436,6 @@ class ExportWorker(QThread):
     progress = pyqtSignal(int)
     finished = pyqtSignal(bool, str)
 
-class UpdateCheckWorker(QThread):
-    finished = pyqtSignal(bool, str, str)  # has_update, latest_version, zip_drive_id
-    
-    def __init__(self, current_version):
-        super().__init__()
-        self.current_version = current_version
-        
-    def run(self):
-        try:
-            has_update, latest, zip_id = check_for_updates(self.current_version)
-            self.finished.emit(has_update, latest, zip_id)
-        except Exception:
-            self.finished.emit(False, "", "")
-            
-class UpdateDownloadWorker(QThread):
-    progress = pyqtSignal(int)
-    finished = pyqtSignal(bool, str)
-    
-    def __init__(self, drive_id, destination):
-        super().__init__()
-        self.drive_id = drive_id
-        self.destination = destination
-        
-    def run(self):
-        try:
-            success = download_file_from_google_drive(self.drive_id, self.destination, self.progress.emit)
-            self.finished.emit(success, self.destination)
-        except Exception as e:
-            self.finished.emit(False, str(e))
-
-    
     def __init__(self, input_video: str, output_video: str, quality: str, subtitle_file: str = None, subtitle_opts: dict = None):
         super().__init__()
         self.input_video = input_video
@@ -466,6 +505,36 @@ class UpdateDownloadWorker(QThread):
                     
         except Exception as e:
             logger.error(f"ExportWorker Hatası: {e}")
+            self.finished.emit(False, str(e))
+
+class UpdateCheckWorker(QThread):
+    finished = pyqtSignal(bool, str, str)  # has_update, latest_version, zip_drive_id
+
+    def __init__(self, current_version):
+        super().__init__()
+        self.current_version = current_version
+
+    def run(self):
+        try:
+            has_update, latest, zip_id = check_for_updates(self.current_version)
+            self.finished.emit(has_update, latest, zip_id)
+        except Exception:
+            self.finished.emit(False, "", "")
+
+class UpdateDownloadWorker(QThread):
+    progress = pyqtSignal(int)
+    finished = pyqtSignal(bool, str)
+
+    def __init__(self, drive_id, destination):
+        super().__init__()
+        self.drive_id = drive_id
+        self.destination = destination
+
+    def run(self):
+        try:
+            success = download_file_from_google_drive(self.drive_id, self.destination, self.progress.emit)
+            self.finished.emit(success, self.destination)
+        except Exception as e:
             self.finished.emit(False, str(e))
 
 class MainWindow(QMainWindow):
@@ -699,8 +768,18 @@ class MainWindow(QMainWindow):
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
             
-        self.setGeometry(100, 100, WINDOW_WIDTH, WINDOW_HEIGHT)
-        self.setMinimumSize(800, 560)
+        screen = QApplication.primaryScreen()
+        available = screen.availableGeometry()
+        self.setMinimumSize(760, 520)
+        if available.height() <= 800:
+            # Küçük ekranlarda (HD laptop) hemen maximize aç
+            QTimer.singleShot(0, self.showMaximized)
+        else:
+            w = min(WINDOW_WIDTH, int(available.width() * 0.88))
+            h = min(WINDOW_HEIGHT, int(available.height() * 0.88))
+            x = available.x() + (available.width() - w) // 2
+            y = available.y() + (available.height() - h) // 2
+            self.setGeometry(x, y, w, h)
         self.setStyleSheet(PREMIUM_DARK_THEME)
         
         # Ana widget
@@ -715,41 +794,57 @@ class MainWindow(QMainWindow):
         # Sidebar
         self.sidebar = QFrame()
         self.sidebar.setObjectName("sidebar")
-        self.sidebar.setMinimumWidth(180)
-        self.sidebar.setMaximumWidth(280)
+        self.sidebar.setMinimumWidth(52)
+        self.sidebar.setMaximumWidth(220)
         sidebar_layout = QVBoxLayout(self.sidebar)
-        sidebar_layout.setContentsMargins(0, 30, 0, 20)
-        sidebar_layout.setSpacing(5)
+        sidebar_layout.setContentsMargins(0, 16, 0, 12)
+        sidebar_layout.setSpacing(2)
         
+        # Hamburger toggle butonu
+        self._sidebar_expanded = True
+        self._sidebar_anim = None
+        self._nav_labels = [
+            ("📹", "Video İşleme"),
+            ("🔊", "Ses İşleme"),
+            ("🤖", "AI Araçları"),
+            ("⚙️", "Ayarlar"),
+            ("💾", "İndir / Dışa Aktar"),
+        ]
+        self.sidebar_toggle_btn = QPushButton("☰")
+        self.sidebar_toggle_btn.setObjectName("sidebar_toggle")
+        self.sidebar_toggle_btn.setFixedHeight(36)
+        self.sidebar_toggle_btn.clicked.connect(self.toggle_sidebar)
+        sidebar_layout.addWidget(self.sidebar_toggle_btn)
+
         # App Title / Logo in Sidebar
-        logo_label = QLabel()
+        self.logo_label = QLabel()
         logo_path = resource_path("img/logo.png")
         if logo_path.exists():
             pixmap = QPixmap(str(logo_path))
-            scaled_pixmap = pixmap.scaledToHeight(125, Qt.TransformationMode.SmoothTransformation)
-            logo_label.setPixmap(scaled_pixmap)
-            logo_label.setStyleSheet("padding-left: 10px; margin-bottom: 30px;")
+            scaled_pixmap = pixmap.scaledToHeight(90, Qt.TransformationMode.SmoothTransformation)
+            self.logo_label.setPixmap(scaled_pixmap)
+            self.logo_label.setStyleSheet("padding-left: 8px; margin-bottom: 12px;")
         else:
-            logo_label.setText("🦈 " + APP_NAME)
-            logo_label.setFont(QFont("Segoe UI", 22, QFont.Weight.Bold))
-            logo_label.setStyleSheet("color: #ffffff; padding-left: 15px; margin-bottom: 30px;")
-        
-        sidebar_layout.addWidget(logo_label)
-        
+            self.logo_label.setText("🦈 " + APP_NAME)
+            self.logo_label.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
+            self.logo_label.setStyleSheet("color: #ffffff; padding-left: 10px; margin-bottom: 12px;")
+
+        sidebar_layout.addWidget(self.logo_label)
+
         # Navigation Buttons
         self.nav_buttons = []
-        
-        self.btn_video = QPushButton("📹 Video İşleme")
-        self.btn_audio = QPushButton("🔊 Ses İşleme")
-        self.btn_ai = QPushButton("🤖 AI Araçları")
+
+        self.btn_video    = QPushButton("📹 Video İşleme")
+        self.btn_audio    = QPushButton("🔊 Ses İşleme")
+        self.btn_ai       = QPushButton("🤖 AI Araçları")
         self.btn_settings = QPushButton("⚙️ Ayarlar")
-        self.btn_export = QPushButton("💾 İndir / Dışa Aktar")
-        
+        self.btn_export   = QPushButton("💾 İndir / Dışa Aktar")
+
         for btn in [self.btn_video, self.btn_audio, self.btn_ai, self.btn_settings, self.btn_export]:
             btn.setCheckable(True)
             sidebar_layout.addWidget(btn)
             self.nav_buttons.append(btn)
-            
+
         sidebar_layout.addStretch()
         
         # Version Label
@@ -763,27 +858,66 @@ class MainWindow(QMainWindow):
         # Add Column 1: Sidebar
         self.main_splitter.addWidget(self.sidebar)
         
-        # Add Column 2: Media Pool
+        # Add Column 2: Media Pool (collapsible)
+        self._media_pool_visible = True
+        self._media_pool_anim = None
         self.media_pool = MediaPoolWidget()
         self.media_pool.media_selected.connect(self.on_media_selected)
-        self.media_pool.setMinimumWidth(250)
-        self.main_splitter.addWidget(self.media_pool)
-        
+        self.media_pool.setMinimumWidth(0)
+
+        # Toggle butonu — media pool'un sağ üst köşesine ekliyoruz
+        mp_toggle = QPushButton("◀")
+        mp_toggle.setObjectName("media_toggle_btn")
+        mp_toggle.setFixedSize(22, 22)
+        mp_toggle.setToolTip("Medya panelini gizle / göster")
+        mp_toggle.clicked.connect(self.toggle_media_pool)
+        self._mp_toggle_btn = mp_toggle
+        # MediaPoolWidget'ın header layout'una ekle (widget hiyerarşisinden bul)
+        header = self.media_pool.findChild(QWidget, "media_header")
+        if header and header.layout():
+            header.layout().addWidget(mp_toggle)
+        else:
+            # fallback: media pool'un üstüne küçük bir şerit ekle
+            mp_wrapper = QWidget()
+            mp_wrapper.setMinimumWidth(0)
+            mp_wl = QVBoxLayout(mp_wrapper)
+            mp_wl.setContentsMargins(0, 0, 0, 0)
+            mp_wl.setSpacing(0)
+            top_strip = QWidget()
+            top_strip.setFixedHeight(26)
+            top_strip.setStyleSheet("background:#181818; border-bottom:1px solid #262626;")
+            strip_l = QHBoxLayout(top_strip)
+            strip_l.setContentsMargins(6, 2, 6, 2)
+            strip_l.addStretch()
+            strip_l.addWidget(mp_toggle)
+            mp_wl.addWidget(top_strip)
+            mp_wl.addWidget(self.media_pool)
+            self.main_splitter.addWidget(mp_wrapper)
+            # erken return — widget eklendi
+            self._mp_wrapper = mp_wrapper
+        if not hasattr(self, '_mp_wrapper'):
+            self.main_splitter.addWidget(self.media_pool)
+            self._mp_wrapper = self.media_pool
+
         # Add Column 3: Workspace (Content Area)
         self.content_area = QWidget()
         self.content_area.setObjectName("content_area")
         content_layout = QVBoxLayout(self.content_area)
-        content_layout.setContentsMargins(20, 20, 20, 20)
-        
+        margin = max(10, int(w * 0.012))
+        content_layout.setContentsMargins(margin, margin, margin, margin)
+
         self.stacked_widget = QStackedWidget()
         content_layout.addWidget(self.stacked_widget)
         self.main_splitter.addWidget(self.content_area)
-        
-        # Set Proportions
-        self.main_splitter.setStretchFactor(0, 0) # Sidebar fixed
-        self.main_splitter.setStretchFactor(1, 1) # Media Pool stretches slightly
-        self.main_splitter.setStretchFactor(2, 4) # Workspace gets max stretch
-        self.main_splitter.setSizes([220, 260, 900])
+
+        # Set Proportions — oransal, ekrana göre
+        self.main_splitter.setStretchFactor(0, 0)
+        self.main_splitter.setStretchFactor(1, 1)
+        self.main_splitter.setStretchFactor(2, 4)
+        sidebar_w = max(160, int(w * 0.155))
+        media_w   = max(190, int(w * 0.185))
+        content_w = w - sidebar_w - media_w
+        self.main_splitter.setSizes([sidebar_w, media_w, content_w])
         
         main_layout.addWidget(self.main_splitter)
         
@@ -807,6 +941,122 @@ class MainWindow(QMainWindow):
         # Status bar styling
         self.statusBar().setStyleSheet("background-color: #181818; color: #a0a0a0; padding-left: 10px; border-top: 1px solid #262626;")
         self.statusBar().showMessage("Hazır")
+
+    # Sidebar collapsed modda buton stili (CSS property selector yerine direkt uygula)
+    _BTN_COLLAPSED = """
+        QPushButton {
+            background: transparent; color: #a0a0a0;
+            text-align: center; padding: 10px 0px;
+            border: none; border-radius: 8px;
+            font-size: 18px; margin: 3px 2px; min-height: 36px;
+        }
+        QPushButton:hover { background: #242424; color: #fff; }
+        QPushButton:checked { background: #1e1e1e; color: #00a8ff; border: none; }
+    """
+
+    def toggle_sidebar(self):
+        if self._sidebar_expanded:
+            self._sidebar_expanded = False
+            self.sidebar_toggle_btn.setText("☰")
+            self.logo_label.hide()
+            for btn, (icon, _) in zip(self.nav_buttons, self._nav_labels):
+                btn.setText(icon)
+                btn.setStyleSheet(self._BTN_COLLAPSED)
+            self._animate_sidebar(52)
+        else:
+            self._sidebar_expanded = True
+            self.sidebar_toggle_btn.setText("✕")
+            self.logo_label.show()
+            for btn, (icon, text) in zip(self.nav_buttons, self._nav_labels):
+                btn.setText(f"{icon} {text}")
+                btn.setStyleSheet("")   # tema stiline dön
+            target = max(160, int(self.width() * 0.155))
+            self._animate_sidebar(target)
+
+    def _animate_sidebar(self, target_w: int):
+        if self._sidebar_anim and self._sidebar_anim.state() != QVariantAnimation.State.Stopped:
+            self._sidebar_anim.stop()
+        current_w = self.main_splitter.sizes()[0]
+        anim = QVariantAnimation(self)
+        anim.setStartValue(current_w)
+        anim.setEndValue(target_w)
+        anim.setDuration(220)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        def _update(val):
+            if hasattr(self, 'main_splitter'):
+                sizes = self.main_splitter.sizes()
+                diff  = val - sizes[0]
+                self.main_splitter.setSizes([val, sizes[1], max(100, sizes[2] - diff)])
+        anim.valueChanged.connect(_update)
+        anim.start()
+        self._sidebar_anim = anim
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if not hasattr(self, 'main_splitter'):
+            return
+        w = self.width()
+        if self._sidebar_expanded:
+            sidebar_w = max(160, int(w * 0.155))
+        else:
+            sidebar_w = 52
+        media_w   = max(190, int(w * 0.185))
+        content_w = w - sidebar_w - media_w
+        self.main_splitter.setSizes([sidebar_w, media_w, content_w])
+
+    def toggle_media_pool(self):
+        if self._media_pool_visible:
+            self._media_pool_visible = False
+            self._mp_toggle_btn.setText("▶")
+            self._mp_toggle_btn.setToolTip("Medya panelini göster")
+            self._animate_panel(self.main_splitter, 1, 0)
+        else:
+            self._media_pool_visible = True
+            self._mp_toggle_btn.setText("◀")
+            self._mp_toggle_btn.setToolTip("Medya panelini gizle")
+            target = max(180, int(self.width() * 0.185))
+            self._animate_panel(self.main_splitter, 1, target)
+
+    def _animate_panel(self, splitter: QSplitter, panel_idx: int, target_w: int):
+        current = splitter.sizes()[panel_idx]
+        anim = QVariantAnimation(self)
+        anim.setStartValue(current)
+        anim.setEndValue(target_w)
+        anim.setDuration(200)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        def _upd(val):
+            sizes = splitter.sizes()
+            diff = val - sizes[panel_idx]
+            new_sizes = list(sizes)
+            new_sizes[panel_idx] = val
+            # Diğer sütunları dengele
+            other = 2 if panel_idx == 1 else 1
+            new_sizes[other] = max(100, sizes[other] - diff)
+            splitter.setSizes(new_sizes)
+        anim.valueChanged.connect(_upd)
+        anim.start()
+        self._media_pool_anim = anim
+
+    def _switch_audio_tool(self, index: int):
+        for i, btn in enumerate(self._audio_tab_btns):
+            btn.setChecked(i == index)
+        self.audio_tools_stack.setCurrentIndex(index)
+
+    def _wrap_scroll(self, widget: QWidget) -> QScrollArea:
+        """Widget'ı yalnızca dikey kaydırmalı bir QScrollArea içine sarar."""
+        scroll = QScrollArea()
+        scroll.setWidget(widget)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        return scroll
+
+    def _page_title(self, text: str) -> QLabel:
+        lbl = QLabel(text)
+        lbl.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
+        lbl.setStyleSheet("color:#ffffff; margin-bottom:4px;")
+        return lbl
 
     def switch_page(self, index):
         """Sayfa değiştir ve sidebar buton state'ini güncelle"""
@@ -834,41 +1084,41 @@ class MainWindow(QMainWindow):
     
     def _create_video_tab(self):
         """Video işleme sekmesi"""
-        widget = QWidget()
-        layout = QVBoxLayout()
-        layout.setSpacing(20)
-        
-        title = QLabel("Video İşleme")
-        title.setFont(QFont("Segoe UI", 24, QFont.Weight.Bold))
-        title.setStyleSheet("color: #ffffff; margin-bottom: 10px;")
-        layout.addWidget(title)
-        
-        # Video kırpma (timeline preview ile)
-        trim_group = QGroupBox("1. Video Kırpma")
+        container = QWidget()
+        outer = QVBoxLayout(container)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(6)
+        outer.addWidget(self._page_title("Video İşleme"))
+
+        inner = QWidget()
+        layout = QVBoxLayout(inner)
+        layout.setContentsMargins(0, 4, 0, 8)
+        layout.setSpacing(10)
+
+        trim_group = QGroupBox("Video Kırpma")
         trim_layout = QVBoxLayout()
-        trim_layout.setSpacing(15)
-        
-        # Advanced Timeline and Preview widget
+        trim_layout.setSpacing(8)
+
         self.timeline_widget = AdvancedVideoTrimmer()
         self.timeline_widget.media_player.errorOccurred.connect(self._on_media_error)
         trim_layout.addWidget(self.timeline_widget)
-        
+
         trim_btn = QPushButton("✂️ Video Kırp")
         trim_btn.setObjectName("primary_action")
+        trim_btn.setMinimumHeight(40)
         trim_btn.clicked.connect(self.trim_video)
         trim_layout.addWidget(trim_btn)
-        
+
         trim_group.setLayout(trim_layout)
         layout.addWidget(trim_group)
-        
-        # Progress bar
+
         self.video_progress = QProgressBar()
         self.video_progress.hide()
         layout.addWidget(self.video_progress)
-        
         layout.addStretch()
-        widget.setLayout(layout)
-        return widget
+
+        outer.addWidget(self._wrap_scroll(inner))
+        return container
     
     def _on_player_position_changed(self, pos_ms):
         sec = pos_ms / 1000.0
@@ -885,167 +1135,212 @@ class MainWindow(QMainWindow):
 
     def _create_audio_tab(self):
         """Ses işleme sekmesi"""
-        widget = QWidget()
-        layout = QVBoxLayout()
-        layout.setSpacing(20)
-        
-        title = QLabel("Ses İşleme")
-        title.setFont(QFont("Segoe UI", 24, QFont.Weight.Bold))
-        title.setStyleSheet("color: #ffffff; margin-bottom: 10px;")
-        layout.addWidget(title)
-        
-        # Ses İşlemleri Başlangıcı
-        
-        # Advanced Timeline and Preview widget
+        container = QWidget()
+        outer = QVBoxLayout(container)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(6)
+        outer.addWidget(self._page_title("Ses İşleme"))
+
+        # ── Dikey splitter: üst=preview, alt=araçlar ──────────────────────
+        v_splitter = QSplitter(Qt.Orientation.Vertical)
+
+        # ── Üst: video önizleme + çoklu ses zaman çizelgesi ───────────────
+        # Üst: sadece video önizleme — kanallar alt tab'a taşındı
         self.audio_timeline_widget = AdvancedVideoTrimmer()
-        layout.addWidget(self.audio_timeline_widget)
-        
-        # DaVinci Style Multitrack Timeline
-        self.multi_track_timeline = AudioTimelineWidget()
-        layout.addWidget(self.multi_track_timeline)
-        
-        # Real-time audio engine
-        from ui.widgets import RealTimeAudioEngine
-        self.audio_engine = RealTimeAudioEngine()
-        self.multi_track_timeline.timeline_changed.connect(self.audio_engine.sync_clips)
-        # Ensure timeline edits persist to the open project file when available;
-        # fallback to auto-save to temp if no project file yet.
-        self.multi_track_timeline.timeline_changed.connect(self._on_timeline_changed)
-        
-        # Mute original video
-        self.audio_timeline_widget.audio_output.setVolume(0.0)
-        
-        # Sync playhead and audio engine
-        self.audio_timeline_widget.media_player.positionChanged.connect(
-            lambda pos: self._on_player_position_changed(pos)
-        )
-        self.audio_timeline_widget.media_player.playbackStateChanged.connect(
-            lambda state: self._on_player_state_changed(state)
-        )
-        self.audio_timeline_widget.media_player.durationChanged.connect(
-            lambda dur: self.multi_track_timeline.set_duration(dur / 1000.0)
-        )
-        self.multi_track_timeline.seek_requested.connect(
-            lambda sec: self.audio_timeline_widget.media_player.setPosition(int(sec * 1000))
-        )
-        
-        # Horizontal Layout for Tools
-        tools_layout = QHBoxLayout()
-        tools_layout.setSpacing(20)
-        
-        # Ses çıkarma
-        extract_group = QGroupBox("1. Ses İşlemleri")
-        extract_layout = QVBoxLayout()
-        extract_layout.setSpacing(15)
-        
-        # Checkbox'lar
-        checkbox_layout = QVBoxLayout()
+        v_splitter.addWidget(self.audio_timeline_widget)
+
+        # ── Alt: araç paneli — tab bar + sayfa slider ─────────────────────
+        tools_container = QWidget()
+        tools_container.setObjectName("tools_container")
+        tools_main = QVBoxLayout(tools_container)
+        tools_main.setContentsMargins(0, 6, 0, 0)
+        tools_main.setSpacing(0)
+
+        # ── Tab bar ────────────────────────────────────────────────────────
+        tab_bar = QWidget()
+        tab_bar.setObjectName("audio_tab_bar")
+        tab_bar_layout = QHBoxLayout(tab_bar)
+        tab_bar_layout.setContentsMargins(8, 6, 8, 0)
+        tab_bar_layout.setSpacing(4)
+
+        _tab_style = """
+            QPushButton {
+                background: transparent;
+                color: #666;
+                border: none;
+                border-bottom: 2px solid transparent;
+                border-radius: 0;
+                padding: 8px 20px;
+                font-size: 13px;
+                font-weight: 500;
+            }
+            QPushButton:hover { color: #aaa; }
+            QPushButton:checked {
+                color: #00a8ff;
+                border-bottom: 2px solid #00a8ff;
+                font-weight: bold;
+            }
+        """
+        self._audio_tab_btns = []
+        tab_labels = ["📢 Ses İşlemleri", "🔇 Gürültü Azaltma", "🎬 Kanallar", "🎚️ Ses Miksajı"]
+        for i, lbl in enumerate(tab_labels):
+            btn = QPushButton(lbl)
+            btn.setCheckable(True)
+            btn.setStyleSheet(_tab_style)
+            btn.clicked.connect(lambda _, idx=i: self._switch_audio_tool(idx))
+            tab_bar_layout.addWidget(btn)
+            self._audio_tab_btns.append(btn)
+        tab_bar_layout.addStretch()
+
+        # Separator çizgisi
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet("background:#222; margin:0;")
+        sep.setFixedHeight(1)
+
+        tools_main.addWidget(tab_bar)
+        tools_main.addWidget(sep)
+
+        # ── İçerik stacked ────────────────────────────────────────────────
+        self.audio_tools_stack = QStackedWidget()
+        tools_main.addWidget(self.audio_tools_stack)
+
+        # ── Sayfa 0: Ses İşlemleri ─────────────────────────────────────────
+        page0 = QWidget()
+        p0 = QVBoxLayout(page0)
+        p0.setContentsMargins(12, 12, 12, 12)
+        p0.setSpacing(12)
+
         self.extract_audio_checkbox = QCheckBox("📢 Sesi İndir (WAV/MP3)")
         self.extract_audio_checkbox.setChecked(True)
         self.extract_video_checkbox = QCheckBox("🎬 Sessiz Videoyu İndir")
-        checkbox_layout.addWidget(self.extract_audio_checkbox)
-        checkbox_layout.addWidget(self.extract_video_checkbox)
-        extract_layout.addLayout(checkbox_layout)
-        
+        p0.addWidget(self.extract_audio_checkbox)
+        p0.addWidget(self.extract_video_checkbox)
+
         extract_btn = QPushButton("📥 Seçilenleri İndir")
         extract_btn.setObjectName("primary_action")
+        extract_btn.setMinimumHeight(42)
         extract_btn.clicked.connect(self.extract_audio_video)
-        extract_layout.addWidget(extract_btn)
-        
-        extract_group.setLayout(extract_layout)
-        tools_layout.addWidget(extract_group)
-        
-        # Gürültü azaltma
-        right_tools_layout = QVBoxLayout()
-        
-        denoise_group = QGroupBox("2. Gürültü Azaltma")
-        denoise_layout = QVBoxLayout()
-        denoise_layout.setSpacing(15)
-        
-        strength_layout = QHBoxLayout()
-        strength_layout.addWidget(QLabel("Filtre Gücü:"))
+        p0.addWidget(extract_btn)
+
+        self.audio_progress = QProgressBar()
+        self.audio_progress.hide()
+        p0.addWidget(self.audio_progress)
+        p0.addStretch()
+        self.audio_tools_stack.addWidget(page0)
+
+        # ── Sayfa 1: Gürültü Azaltma ───────────────────────────────────────
+        page1 = QWidget()
+        p1 = QVBoxLayout(page1)
+        p1.setContentsMargins(12, 12, 12, 12)
+        p1.setSpacing(10)
+
+        strength_row = QHBoxLayout()
+        strength_row.addWidget(QLabel("Filtre Gücü:"))
         self.denoise_strength = QDoubleSpinBox()
         self.denoise_strength.setMinimum(0)
         self.denoise_strength.setMaximum(1)
         self.denoise_strength.setValue(0.8)
         self.denoise_strength.setSingleStep(0.1)
-        strength_layout.addWidget(self.denoise_strength)
-        denoise_layout.addLayout(strength_layout)
+        strength_row.addWidget(self.denoise_strength)
+        strength_row.addStretch()
+        p1.addLayout(strength_row)
 
-        auto_strength_btn = QPushButton("🤖 Otomatik Güç Algıla")
-        auto_strength_btn.clicked.connect(self.auto_set_denoise_strength)
-        denoise_layout.addWidget(auto_strength_btn)
+        auto_btn = QPushButton("🤖 Otomatik Güç Algıla")
+        auto_btn.clicked.connect(self.auto_set_denoise_strength)
+        p1.addWidget(auto_btn)
 
         self.denoise_metrics_label = QLabel("SNR: - dB | Kalite: -/5")
         self.denoise_metrics_label.setStyleSheet("color: #888;")
-        denoise_layout.addWidget(self.denoise_metrics_label)
-        
-        # A/B Toggle Switch
-        self.ab_toggle_layout = QHBoxLayout()
-        self.btn_original = QPushButton("Orijinal")
-        self.btn_denoised = QPushButton("Temizlenmiş")
+        p1.addWidget(self.denoise_metrics_label)
+
+        _seg = """
+            QPushButton {
+                background:#1e1e1e; border:1px solid #2a2a2a;
+                padding:6px 14px; color:#888; border-radius:4px;
+            }
+            QPushButton:checked {
+                background:#00a8ff; color:white;
+                border:1px solid #00a8ff; font-weight:bold;
+            }
+        """
+        ab_row = QHBoxLayout()
+        self.ab_toggle_layout = ab_row
+        self.btn_original  = QPushButton("Orijinal")
+        self.btn_denoised  = QPushButton("Temizlenmiş")
         self.btn_original.setCheckable(True)
         self.btn_denoised.setCheckable(True)
         self.btn_original.setChecked(True)
-        self.btn_denoised.setEnabled(False) # Disabled until processed
-        
-        segmented_style = """
-            QPushButton {
-                background-color: #1e1e1e;
-                border: 1px solid #2a2a2a;
-                padding: 5px 10px;
-                color: #888;
-                border-radius: 4px;
-                font-weight: normal;
-            }
-            QPushButton:checked {
-                background-color: #00a8ff;
-                color: white;
-                border: 1px solid #00a8ff;
-                font-weight: bold;
-            }
-        """
-        self.btn_original.setStyleSheet(segmented_style)
-        self.btn_denoised.setStyleSheet(segmented_style)
-        
+        self.btn_denoised.setEnabled(False)
+        self.btn_original.setStyleSheet(_seg)
+        self.btn_denoised.setStyleSheet(_seg)
         self.btn_original.clicked.connect(lambda: self.toggle_ab_mode(False))
         self.btn_denoised.clicked.connect(lambda: self.toggle_ab_mode(True))
-        
-        self.ab_toggle_layout.addWidget(self.btn_original)
-        self.ab_toggle_layout.addWidget(self.btn_denoised)
-        denoise_layout.addLayout(self.ab_toggle_layout)
-        
+        ab_row.addWidget(self.btn_original)
+        ab_row.addWidget(self.btn_denoised)
+        ab_row.addStretch()
+        p1.addLayout(ab_row)
+
         self.btn_denoise = QPushButton("🔇 Gürültüyü Temizle")
         self.btn_denoise.setObjectName("primary_action")
+        self.btn_denoise.setMinimumHeight(42)
         self.btn_denoise.clicked.connect(self.reduce_noise)
-        denoise_layout.addWidget(self.btn_denoise)
-        
-        denoise_group.setLayout(denoise_layout)
-        right_tools_layout.addWidget(denoise_group)
-        
-        right_tools_layout.addStretch()
-        tools_layout.addLayout(right_tools_layout)
-        
-        layout.addLayout(tools_layout)
-        
-        self.audio_progress = QProgressBar()
-        self.audio_progress.hide()
-        layout.addWidget(self.audio_progress)
-        
-        layout.addStretch()
-        widget.setLayout(layout)
-        return widget
+        p1.addWidget(self.btn_denoise)
+        p1.addStretch()
+        self.audio_tools_stack.addWidget(page1)
+
+        # ── Sayfa 2: Kanallar (multi-track timeline) ───────────────────────
+        self.multi_track_timeline = AudioTimelineWidget()
+        self.audio_tools_stack.addWidget(self.multi_track_timeline)
+
+        # ── Sayfa 3: Ses Miksajı (placeholder) ────────────────────────────
+        page3 = QWidget()
+        p3 = QVBoxLayout(page3)
+        p3.setContentsMargins(12, 12, 12, 12)
+        ph = QLabel("🎚️ Ses Miksajı\n\nYakında gelecek.")
+        ph.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ph.setStyleSheet("color:#555; font-size:15px;")
+        p3.addWidget(ph)
+        self.audio_tools_stack.addWidget(page3)
+
+        self._switch_audio_tool(0)
+        v_splitter.addWidget(tools_container)
+
+        v_splitter.setStretchFactor(0, 4)
+        v_splitter.setStretchFactor(1, 1)
+        v_splitter.setSizes([9999, 200])
+        outer.addWidget(v_splitter)
+
+        # ── Sinyal bağlantıları ────────────────────────────────────────────
+        from ui.widgets import RealTimeAudioEngine
+        self.audio_engine = RealTimeAudioEngine()
+        self.multi_track_timeline.timeline_changed.connect(self.audio_engine.sync_clips)
+        self.multi_track_timeline.timeline_changed.connect(self._on_timeline_changed)
+        self.audio_timeline_widget.audio_output.setVolume(0.0)
+        self.audio_timeline_widget.media_player.positionChanged.connect(
+            lambda pos: self._on_player_position_changed(pos))
+        self.audio_timeline_widget.media_player.playbackStateChanged.connect(
+            lambda state: self._on_player_state_changed(state))
+        self.audio_timeline_widget.media_player.durationChanged.connect(
+            lambda dur: self.multi_track_timeline.set_duration(dur / 1000.0))
+        self.multi_track_timeline.seek_requested.connect(
+            lambda sec: self.audio_timeline_widget.media_player.setPosition(int(sec * 1000)))
+
+        return container
     
     def _create_ai_tab(self):
         """AI araçları sekmesi (faster-whisper ile transkripsiyon)"""
-        widget = QWidget()
-        layout = QVBoxLayout()
-        layout.setSpacing(20)
-        
-        title = QLabel("🤖 AI Araçları - Otomatik Altyazı")
-        title.setFont(QFont("Segoe UI", 24, QFont.Weight.Bold))
-        title.setStyleSheet("color: #ffffff; margin-bottom: 10px;")
-        layout.addWidget(title)
+        container = QWidget()
+        outer = QVBoxLayout(container)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(6)
+        outer.addWidget(self._page_title("🤖 AI Araçları - Otomatik Altyazı"))
+
+        inner = QWidget()
+        widget = inner
+        layout = QVBoxLayout(inner)
+        layout.setContentsMargins(0, 4, 0, 8)
+        layout.setSpacing(10)
         
         # Otomatik altyazı (faster-whisper)
         subtitle_group = QGroupBox("Otomatik Altyazı Oluşturma (faster-whisper)")
@@ -1063,7 +1358,7 @@ class MainWindow(QMainWindow):
         # Model seçimi
         model_layout = QHBoxLayout()
         model_label = QLabel("📦 Model Boyutu:")
-        model_label.setFixedWidth(120)
+        model_label.setMinimumWidth(100)
         self.whisper_model_combo = QComboBox()
         self.whisper_model_combo.addItems(["tiny", "base", "small", "medium"])
         self.whisper_model_combo.setCurrentText("base")
@@ -1076,7 +1371,7 @@ class MainWindow(QMainWindow):
         # Dil seçimi
         lang_layout = QHBoxLayout()
         lang_label = QLabel("🌐 Dil:")
-        lang_label.setFixedWidth(120)
+        lang_label.setMinimumWidth(100)
         self.whisper_lang_combo = QComboBox()
         self.whisper_lang_combo.addItems(["Otomatik", "Türkçe (tr)", "İngilizce (en)", "Arapça (ar)"])
         self.whisper_lang_combo.setStyleSheet("padding: 5px;")
@@ -1158,11 +1453,11 @@ class MainWindow(QMainWindow):
         
         future_group.setLayout(future_layout)
         layout.addWidget(future_group)
-        
         layout.addStretch()
-        widget.setLayout(layout)
-        return widget
-    
+
+        outer.addWidget(self._wrap_scroll(inner))
+        return container
+
     def _get_audio_for_transcription(self) -> tuple:
         """
         Altyazı oluşturmak için gerekli ses dosyasını otomatik olarak bul.
@@ -1341,14 +1636,17 @@ class MainWindow(QMainWindow):
     
     def _create_settings_tab(self):
         """Ayarlar sekmesi"""
-        widget = QWidget()
-        layout = QVBoxLayout()
-        layout.setSpacing(20)
-        
-        title = QLabel("Hakkında & Ayarlar")
-        title.setFont(QFont("Segoe UI", 24, QFont.Weight.Bold))
-        title.setStyleSheet("color: #ffffff; margin-bottom: 10px;")
-        layout.addWidget(title)
+        container = QWidget()
+        outer = QVBoxLayout(container)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(6)
+        outer.addWidget(self._page_title("Hakkında & Ayarlar"))
+
+        inner = QWidget()
+        widget = inner
+        layout = QVBoxLayout(inner)
+        layout.setContentsMargins(0, 4, 0, 8)
+        layout.setSpacing(10)
         
         info_group = QGroupBox("Uygulama Bilgileri")
         info_layout = QVBoxLayout()
@@ -1373,19 +1671,23 @@ class MainWindow(QMainWindow):
         
         layout.addWidget(info_group)
         layout.addStretch()
-        widget.setLayout(layout)
-        return widget
-        
+
+        outer.addWidget(self._wrap_scroll(inner))
+        return container
+
     def _create_export_tab(self):
         """Videoyu İndir / Dışa Aktar sekmesi"""
-        widget = QWidget()
-        layout = QVBoxLayout()
-        layout.setSpacing(20)
-        
-        title = QLabel("💾 Videoyu Dışa Aktar")
-        title.setFont(QFont("Segoe UI", 24, QFont.Weight.Bold))
-        title.setStyleSheet("color: #ffffff; margin-bottom: 10px;")
-        layout.addWidget(title)
+        container = QWidget()
+        outer = QVBoxLayout(container)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(6)
+        outer.addWidget(self._page_title("💾 Videoyu Dışa Aktar"))
+
+        inner = QWidget()
+        widget = inner
+        layout = QVBoxLayout(inner)
+        layout.setContentsMargins(0, 4, 0, 8)
+        layout.setSpacing(10)
         
         export_group = QGroupBox("Dışa Aktarma Gelişmiş Ayarları")
         export_layout = QVBoxLayout()
@@ -1394,7 +1696,7 @@ class MainWindow(QMainWindow):
         # Format
         format_layout = QHBoxLayout()
         format_label = QLabel("📥 Çıktı Formatı:")
-        format_label.setFixedWidth(120)
+        format_label.setMinimumWidth(100)
         self.export_format_combo = QComboBox()
         self.export_format_combo.addItems([".mp4", ".mov", ".avi", ".mkv"])
         self.export_format_combo.setStyleSheet("padding: 5px;")
@@ -1405,7 +1707,7 @@ class MainWindow(QMainWindow):
         # Çözünürlük
         res_layout = QHBoxLayout()
         res_label = QLabel("🖥️ Çözünürlük:")
-        res_label.setFixedWidth(120)
+        res_label.setMinimumWidth(100)
         self.export_res_combo = QComboBox()
         self.export_res_combo.setEditable(True)
         self.export_res_combo.addItems(["Orijinal", "1920x1080 (Yatay FHD)", "1080x1920 (Dikey FHD/Tiktok)", "1280x720 (Yatay HD)", "720x1280 (Dikey HD/Tiktok)", "3840x2160 (4K UHD)"])
@@ -1421,7 +1723,7 @@ class MainWindow(QMainWindow):
         # Kalite / Bitrate
         quality_layout = QHBoxLayout()
         quality_label = QLabel("✨ Çıktı Kalitesi:")
-        quality_label.setFixedWidth(120)
+        quality_label.setMinimumWidth(100)
         self.export_quality_combo = QComboBox()
         self.export_quality_combo.addItems(["Yüksek Kalite (Yavaş)", "Orta (Dengeli)", "Düşük (Hızlı Çıktı)"])
         self.export_quality_combo.setStyleSheet("padding: 5px;")
@@ -1437,39 +1739,43 @@ class MainWindow(QMainWindow):
         self.export_subtitle_path = QLabel("Seçilen Dosya: Yok")
         self.export_subtitle_path.setStyleSheet("color: #aaaaaa; font-style: italic;")
         
-        btn_select_srt = QPushButton("SRT Seç")
-        btn_select_srt.clicked.connect(self.select_subtitle_for_export)
-        btn_select_srt.setFixedWidth(100)
-        
+        self.btn_select_srt = QPushButton("SRT Seç")
+        self.btn_select_srt.clicked.connect(self.select_subtitle_for_export)
+        self.btn_select_srt.setFixedWidth(100)
+
         subtitle_layout.addWidget(self.export_add_subtitle_cmd)
-        subtitle_layout.addWidget(btn_select_srt)
+        subtitle_layout.addWidget(self.btn_select_srt)
         subtitle_layout.addWidget(self.export_subtitle_path)
         subtitle_layout.addStretch()
-        
+
         export_layout.addLayout(subtitle_layout)
-        
+
         # Altyazı stil ayarları (Boyut ve Yükseklik)
         self.subtitle_style_layout = QHBoxLayout()
-        
-        lbl_fontsize = QLabel("Altyazı Büyüklüğü:")
+
+        self.lbl_fontsize = QLabel("Altyazı Büyüklüğü:")
         self.spin_fontsize = QSpinBox()
         self.spin_fontsize.setRange(10, 150)
         self.spin_fontsize.setValue(24)
-        
-        lbl_margin_v = QLabel("Yükseklik (Aşağıdan Yukarı):")
+
+        self.lbl_margin_v = QLabel("Yükseklik (Aşağıdan Yukarı):")
         self.spin_margin_v = QSpinBox()
         self.spin_margin_v.setRange(0, 500)
         self.spin_margin_v.setValue(30)
         self.spin_margin_v.setToolTip("Değer arttıkça altyazı videonun yukarısına doğru çıkar.")
-        
-        self.subtitle_style_layout.addWidget(lbl_fontsize)
+
+        self.subtitle_style_layout.addWidget(self.lbl_fontsize)
         self.subtitle_style_layout.addWidget(self.spin_fontsize)
         self.subtitle_style_layout.addSpacing(20)
-        self.subtitle_style_layout.addWidget(lbl_margin_v)
+        self.subtitle_style_layout.addWidget(self.lbl_margin_v)
         self.subtitle_style_layout.addWidget(self.spin_margin_v)
         self.subtitle_style_layout.addStretch()
-        
+
         export_layout.addLayout(self.subtitle_style_layout)
+
+        # Checkbox toggle: SRT kontrolleri checkbox'a göre aktif/pasif
+        self.export_add_subtitle_cmd.toggled.connect(self._on_subtitle_toggle)
+        self._on_subtitle_toggle(False)  # Başlangıçta pasif
         
         export_group.setLayout(export_layout)
         layout.addWidget(export_group)
@@ -1486,7 +1792,7 @@ class MainWindow(QMainWindow):
         
         self.btn_action_export = QPushButton("🚀 VİDEOYU İNDİR")
         self.btn_action_export.setObjectName("primary_action")
-        self.btn_action_export.setMinimumSize(250, 50)
+        self.btn_action_export.setMinimumHeight(44)
         self.btn_action_export.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
         self.btn_action_export.clicked.connect(self.process_export_action)
         
@@ -1495,9 +1801,18 @@ class MainWindow(QMainWindow):
         
         layout.addLayout(action_layout)
         layout.addStretch()
-        widget.setLayout(layout)
-        return widget
+
+        outer.addWidget(self._wrap_scroll(inner))
+        return container
         
+    def _on_subtitle_toggle(self, checked: bool):
+        self.btn_select_srt.setEnabled(checked)
+        self.export_subtitle_path.setEnabled(checked)
+        self.spin_fontsize.setEnabled(checked)
+        self.spin_margin_v.setEnabled(checked)
+        self.lbl_fontsize.setEnabled(checked)
+        self.lbl_margin_v.setEnabled(checked)
+
     def select_subtitle_for_export(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "SRT Seç", self.project_manager.last_used_directory, "Subtitle Files (*.srt)")
         if file_path:
@@ -1677,9 +1992,13 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Lütfen önce bir video seçin")
             return
         
+        if not video_path:
+            self.statusBar().showMessage("Lütfen önce bir video veya ses dosyası yükleyin")
+            return
+
         download_audio = self.extract_audio_checkbox.isChecked()
         download_video = self.extract_video_checkbox.isChecked()
-        
+
         if not download_audio and not download_video:
             self.statusBar().showMessage("Lütfen indirmek istediğiniz dosya türünü seçin")
             return
