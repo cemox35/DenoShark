@@ -544,9 +544,10 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.current_video_path = None
         self.current_audio_path = None
-        
+        self._is_modified = False
+
         self.init_ui()
-        
+
         # Initialize Project Manager and Auto-save
         self.project_manager = ProjectManager(self)
         self._init_menu_bar()
@@ -647,6 +648,7 @@ class MainWindow(QMainWindow):
         
     def _on_timeline_changed(self, mix_data):
         """Called when timeline changes. Save to current project if set, otherwise autosave."""
+        self._mark_modified()
         try:
             if hasattr(self, 'project_manager') and self.project_manager and self.project_manager.current_project_path:
                 # Save silently to the existing project file
@@ -662,11 +664,15 @@ class MainWindow(QMainWindow):
             logger.error(f"Error saving project on timeline change: {e}")
         
     def new_project(self):
-        reply = QMessageBox.question(self, 'New Project', 'Are you sure you want to clear current workspace?',
-                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        reply = QMessageBox.question(
+            self, 'Yeni Proje', 'Mevcut çalışma alanını temizlemek istediğinize emin misiniz?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
         if reply == QMessageBox.StandardButton.Yes:
             self.project_manager._clear_workspace()
             self.project_manager.current_project_path = None
+            self._mark_saved()
             
     def open_project(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Open DenoShark Project", self.project_manager.last_used_directory, "DenoShark Projects (*.deno)")
@@ -679,19 +685,25 @@ class MainWindow(QMainWindow):
     def save_project(self):
         if self.project_manager.current_project_path:
             if self.project_manager.save_project(self.project_manager.current_project_path):
-                self.statusBar().showMessage("Project saved successfully.", 3000)
+                self._mark_saved()
+                self.statusBar().showMessage("Proje kaydedildi.", 3000)
         else:
             self.save_project_as()
-            
+
     def save_project_as(self):
-        file_path, _ = QFileDialog.getSaveFileName(self, "Save DenoShark Project As", self.project_manager.last_used_directory, "DenoShark Projects (*.deno)")
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Projeyi Farklı Kaydet",
+            self.project_manager.last_used_directory,
+            "DenoShark Projeleri (*.deno)"
+        )
         if file_path:
             if not file_path.endswith(".deno"):
                 file_path += ".deno"
             if self.project_manager.save_project(file_path):
-                QMessageBox.information(self, "Success", "Project saved successfully.")
+                self._mark_saved()
+                self.statusBar().showMessage("Proje kaydedildi.", 3000)
             else:
-                QMessageBox.warning(self, "Error", "Failed to save project.")
+                QMessageBox.warning(self, "Hata", "Proje kaydedilemedi.")
                 
     def import_media(self):
         # Already handled by media pool, but we can trigger it directly
@@ -863,6 +875,7 @@ class MainWindow(QMainWindow):
         self._media_pool_anim = None
         self.media_pool = MediaPoolWidget()
         self.media_pool.media_selected.connect(self.on_media_selected)
+        self.media_pool.media_added.connect(lambda _: self._mark_modified())
         self.media_pool.setMinimumWidth(0)
 
         # Toggle butonu — media pool'un sağ üst köşesine ekliyoruz
@@ -1036,6 +1049,47 @@ class MainWindow(QMainWindow):
         anim.valueChanged.connect(_upd)
         anim.start()
         self._media_pool_anim = anim
+
+    # ── Değişiklik takibi ─────────────────────────────────────────────────
+    def _mark_modified(self):
+        if not self._is_modified:
+            self._is_modified = True
+            self.setWindowTitle(self.windowTitle().rstrip(" *") + " *")
+
+    def _mark_saved(self):
+        self._is_modified = False
+        title = self.windowTitle()
+        if title.endswith(" *"):
+            self.setWindowTitle(title[:-2])
+
+    def closeEvent(self, event):
+        if not self._is_modified:
+            event.accept()
+            return
+
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Kaydedilmemiş Değişiklikler")
+        msg.setText("Projede kaydedilmemiş değişiklikler var.")
+        msg.setInformativeText("Çıkmadan önce kaydetmek ister misiniz?")
+        msg.setIcon(QMessageBox.Icon.Question)
+        btn_yes    = msg.addButton("Evet",   QMessageBox.ButtonRole.AcceptRole)
+        btn_no     = msg.addButton("Hayır",  QMessageBox.ButtonRole.DestructiveRole)
+        btn_cancel = msg.addButton("İptal",  QMessageBox.ButtonRole.RejectRole)
+        msg.setDefaultButton(btn_yes)
+        msg.exec()
+
+        clicked = msg.clickedButton()
+        if clicked == btn_yes:
+            self.save_project()
+            # Kayıt başarısız olduysa (dosya seçilmedi vb.) pencereyi kapatma
+            if self._is_modified:
+                event.ignore()
+            else:
+                event.accept()
+        elif clicked == btn_no:
+            event.accept()
+        else:  # İptal
+            event.ignore()
 
     def _switch_audio_tool(self, index: int):
         for i, btn in enumerate(self._audio_tab_btns):
@@ -1895,6 +1949,7 @@ class MainWindow(QMainWindow):
         """Video'yu iç olarak yükle"""
         try:
             self.current_video_path = file_path
+            self._mark_modified()
             
             if is_audio:
                 from utils.media_manager import MediaManager
@@ -1925,6 +1980,7 @@ class MainWindow(QMainWindow):
         """Ses işleme sekmesi için video'yu iç olarak yükle"""
         try:
             self.audio_video_path = file_path
+            self._mark_modified()
             handler = VideoHandler(file_path)
             info = handler.get_info()
             

@@ -502,7 +502,8 @@ class AdvancedVideoTrimmer(QWidget):
 
 class MediaPoolWidget(QFrame):
     """Proje Medya Kütüphanesi (Media Pool)"""
-    media_selected = pyqtSignal(str) # file_path
+    media_selected = pyqtSignal(str)  # file_path
+    media_added    = pyqtSignal(str)  # file_path — yeni dosya eklendi
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -606,6 +607,7 @@ class MediaPoolWidget(QFrame):
             for i in range(self.list_widget.count()):
                 if self.list_widget.item(i).data(Qt.ItemDataRole.UserRole) == file_path:
                     return
+            self.media_added.emit(file_path)
             
             item = QListWidgetItem()
             item.setText(info['name'])
